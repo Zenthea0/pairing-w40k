@@ -855,7 +855,6 @@ function PairingEngine() {
   const [hideFixedPlayers, setHideFixedPlayers] = useState(false);
   const [showArmyListPlayer, setShowArmyListPlayer] = useState(null);
   const [showStartPairingConfirm, setShowStartPairingConfirm] = useState(false);
-  const [showPdfExportModal, setShowPdfExportModal] = useState(false);
   const [showBestCombinations, setShowBestCombinations] = useState(false);
   
   // Current round being played
@@ -2531,49 +2530,11 @@ function PairingEngine() {
         
         {/* Bouton Export PDF Feuille de Pairing */}
         <button
-          onClick={() => setShowPdfExportModal(true)}
+          onClick={() => exportPairingPDF(currentRoundIndex)}
           className="w-full mt-2 py-3 bg-orange-600 rounded-lg font-semibold hover:bg-orange-500"
         >
           📄 Exporter feuille de pairing (PDF)
         </button>
-        
-        {/* Modal choix équipe A/B */}
-        {showPdfExportModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-gray-800 rounded-lg p-6 max-w-md mx-4">
-              <h3 className="text-lg font-bold mb-4">Export Feuille de Pairing</h3>
-              <p className="text-gray-300 mb-4">
-                Quelle équipe a gagné le toss (équipe A) ?
-              </p>
-              <div className="space-y-2 mb-4">
-                <button
-                  onClick={() => {
-                    exportPairingPDF(currentRoundIndex, 'A');
-                    setShowPdfExportModal(false);
-                  }}
-                  className="w-full py-3 bg-blue-600 rounded-lg font-semibold hover:bg-blue-500"
-                >
-                  {data.myTeam.name}
-                </button>
-                <button
-                  onClick={() => {
-                    exportPairingPDF(currentRoundIndex, 'B');
-                    setShowPdfExportModal(false);
-                  }}
-                  className="w-full py-3 bg-red-600 rounded-lg font-semibold hover:bg-red-500"
-                >
-                  {data.opponents[round?.pairingResult?.opponentIndex]?.name || 'Adversaire'}
-                </button>
-              </div>
-              <button
-                onClick={() => setShowPdfExportModal(false)}
-                className="w-full py-2 bg-gray-700 rounded-lg hover:bg-gray-600"
-              >
-                Annuler
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     );
   };
@@ -2869,7 +2830,7 @@ function PairingEngine() {
   // ============================================
   // EXPORT PAIRING SHEET PDF
   // ============================================
-  const exportPairingPDF = (roundIndex, weAreTeam) => {
+  const exportPairingPDF = (roundIndex) => {
     const round = roundIndex !== null ? data.rounds?.[roundIndex] : null;
     const pairingResult = round?.pairingResult;
     
@@ -2885,10 +2846,7 @@ function PairingEngine() {
     const details = pairingResult.pairingDetails;
     const fixedDuels = pairingResult.fixedDuels || [];
     const duelScores = round?.duelScores || [];
-    
-    // Déterminer équipe A et B
-    const teamA = weAreTeam === 'A' ? data.myTeam : { name: opponent.name, players: opponent.players };
-    const teamB = weAreTeam === 'A' ? { name: opponent.name, players: opponent.players } : data.myTeam;
+    const matrix = opponent?.matrix;
     
     // Fonction helper pour obtenir un joueur
     const getPlayer = (team, idx) => {
@@ -2897,28 +2855,43 @@ function PairingEngine() {
       return opponent.players[idx];
     };
     
-    // Générer le PDF avec canvas (format paysage A4, haute résolution)
-    const scale = 3; // Facteur de résolution x3 pour netteté
+    // Format joueur pour affichage
+    const formatPlayer = (player) => {
+      if (!player) return '?';
+      const faction = player.factionShort || player.faction?.slice(0, 4) || '';
+      const pseudo = player.pseudo || '';
+      return faction ? `${faction} (${pseudo})` : pseudo;
+    };
+    
+    // Générer le PDF avec canvas (format portrait A4, haute résolution)
+    const scale = 3;
     const canvas = document.createElement('canvas');
-    const baseWidth = 1122; // A4 paysage en pixels à 96 DPI
-    const baseHeight = 794;
+    const baseWidth = 595; // A4 portrait en pixels à 72 DPI
+    const baseHeight = 842;
     canvas.width = baseWidth * scale;
     canvas.height = baseHeight * scale;
     const ctx = canvas.getContext('2d');
     
-    // Appliquer le scale
     ctx.scale(scale, scale);
     
     // Fond blanc
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, baseWidth, baseHeight);
     
-    // Styles
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 0.5;
+    // Couleurs
+    const colors = {
+      blue: '#2563eb',
+      red: '#dc2626',
+      green: '#16a34a',
+      gray: '#6b7280',
+      lightGray: '#f3f4f6',
+      border: '#d1d5db',
+      black: '#000000',
+    };
     
+    // Helpers
     const drawText = (text, x, y, options = {}) => {
-      const { size = 9, bold = false, align = 'center', color = '#000000' } = options;
+      const { size = 10, bold = false, align = 'left', color = colors.black } = options;
       ctx.fillStyle = color;
       ctx.font = `${bold ? 'bold ' : ''}${size}px Arial, sans-serif`;
       ctx.textAlign = align;
@@ -2926,480 +2899,256 @@ function PairingEngine() {
       ctx.fillText(text || '', x, y);
     };
     
-    const drawCell = (x, y, w, h, text, options = {}) => {
-      ctx.strokeRect(x, y, w, h);
-      if (text !== undefined && text !== null && text !== '') {
-        drawText(String(text), x + w/2, y + h/2, { ...options, align: 'center' });
+    const drawBox = (x, y, w, h, fill = null, stroke = colors.border) => {
+      if (fill) {
+        ctx.fillStyle = fill;
+        ctx.fillRect(x, y, w, h);
       }
-    };
-    
-    const drawCellLeft = (x, y, w, h, text, options = {}) => {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 1;
       ctx.strokeRect(x, y, w, h);
-      if (text !== undefined && text !== null && text !== '') {
-        drawText(String(text), x + 3, y + h/2, { ...options, align: 'left' });
-      }
     };
     
-    // Dimensions
-    const margin = 20;
-    const tableY = 90;
-    const rowHeight = 28;
-    const headerHeight = 22;
-    
-    // Largeurs des colonnes
-    const colW = {
-      table: 35,
-      order: 45,
-      faction: 75,
-      name: 70,
-      pseudo: 65,
-      pts: 40,
-      score: 30,
-      penal: 35,
-      adv: 45,
+    const drawLine = (x1, y1, x2, y2) => {
+      ctx.strokeStyle = colors.border;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
     };
     
-    const sideWidth = colW.order + colW.faction + colW.name + colW.pseudo + colW.pts + colW.score + colW.penal + colW.adv;
-    const totalWidth = colW.table + sideWidth * 2 + colW.adv * 2;
-    const tableX = (baseWidth - totalWidth) / 2;
-    
+    const margin = 30;
     let y = margin;
     
     // === TITRE ===
-    drawText('Feuille de pairing - équipe de 6 joueurs', baseWidth / 2, y + 15, { size: 16, bold: true });
-    y += 40;
+    drawBox(margin, y, baseWidth - 2 * margin, 60, colors.lightGray);
+    drawText('FEUILLE DE PAIRING', baseWidth / 2, y + 18, { size: 16, bold: true, align: 'center' });
+    drawText(`${data.myTeam.name}  vs  ${opponent.name}`, baseWidth / 2, y + 38, { size: 12, align: 'center' });
+    const roundInfo = round?.name || 'Pairing';
+    const scenarioInfo = [round?.scenario, round?.deployment].filter(Boolean).join(' - ');
+    if (scenarioInfo) {
+      drawText(`${roundInfo} - ${scenarioInfo}`, baseWidth / 2, y + 52, { size: 9, align: 'center', color: colors.gray });
+    }
+    y += 70;
     
-    // === Ordre du choix ===
-    drawText('Ordre du choix des tables : ABBABA', tableX, y, { size: 9, align: 'left' });
-    y += 12;
-    drawText("Note: dans ce document, l'équipe A est celle ayant remporté le TOSS", tableX, y, { size: 7, align: 'left' });
-    y += 18;
-    
-    // === EN-TÊTES DES ÉQUIPES ===
-    const teamHeaderY = y;
-    
-    // Case Numéro Table (fusionnée sur 2 lignes)
-    ctx.fillStyle = '#f0f0f0';
-    ctx.fillRect(tableX, teamHeaderY, colW.table, headerHeight * 2);
-    drawCell(tableX, teamHeaderY, colW.table, headerHeight * 2, 'Numéro\nTable', { size: 7, bold: true });
-    
-    // Équipe A header
-    let x = tableX + colW.table;
-    ctx.fillStyle = '#e8e8e8';
-    ctx.fillRect(x, teamHeaderY, sideWidth + colW.adv, headerHeight);
-    ctx.strokeRect(x, teamHeaderY, sideWidth + colW.adv, headerHeight);
-    drawText(`Nom de l'ÉQUIPE A : ${teamA.name}`, x + 5, teamHeaderY + headerHeight/2, { size: 9, bold: true, align: 'left' });
-    
-    // Équipe B header  
-    x = tableX + colW.table + sideWidth + colW.adv;
-    ctx.fillStyle = '#e8e8e8';
-    ctx.fillRect(x, teamHeaderY, sideWidth + colW.adv, headerHeight);
-    ctx.strokeRect(x, teamHeaderY, sideWidth + colW.adv, headerHeight);
-    drawText(`Nom de l'ÉQUIPE B : ${teamB.name}`, x + 5, teamHeaderY + headerHeight/2, { size: 9, bold: true, align: 'left' });
-    
-    y += headerHeight;
-    
-    // === EN-TÊTES DES COLONNES ===
-    x = tableX + colW.table;
-    const colHeaders = [
-      { text: 'Ordre du\npairing', w: colW.order },
-      { text: 'Faction', w: colW.faction },
-      { text: 'Nom du\njoueur', w: colW.name },
-      { text: 'Pseudo MHQ', w: colW.pseudo },
-      { text: 'Pts Vic\n/100', w: colW.pts },
-      { text: 'Score\n/20', w: colW.score },
-      { text: 'Pénal.', w: colW.penal },
-      { text: 'Adv.\nChoisi', w: colW.adv },
-      { text: 'Adv.\nChoisi', w: colW.adv },
-      { text: 'Pénal.', w: colW.penal },
-      { text: 'Score\n/20', w: colW.score },
-      { text: 'Pts Vic\n/100', w: colW.pts },
-      { text: 'Pseudo MHQ', w: colW.pseudo },
-      { text: 'Nom du\njoueur', w: colW.name },
-      { text: 'Faction', w: colW.faction },
-      { text: 'Ordre du\npairing', w: colW.order },
-    ];
-    
-    colHeaders.forEach(h => {
-      ctx.fillStyle = '#f5f5f5';
-      ctx.fillRect(x, y, h.w, headerHeight);
-      drawCell(x, y, h.w, headerHeight, h.text, { size: 6, bold: true });
-      x += h.w;
-    });
-    
-    y += headerHeight;
-    
-    // === DONNÉES DU TABLEAU ===
-    const c1 = details.cycle1;
-    const c2 = details.cycle2;
-    
-    // Structure des lignes avec gestion des cellules fusionnées
-    // Pour Def1 et Def2, certaines cellules s'étendent sur 2 lignes
-    
-    const renderRow = (rowData, rowY, rowH) => {
-      let x = tableX;
+    // === FONCTION POUR DESSINER UN CYCLE ===
+    const drawCycle = (cycleNum, cycleData, startY) => {
+      let cy = startY;
+      const boxWidth = baseWidth - 2 * margin;
+      const halfWidth = (boxWidth - 20) / 2;
       
-      // Numéro de table
-      if (rowData.table !== undefined) {
-        drawCell(x, rowY, colW.table, rowH, rowData.table, { size: 9 });
-      }
-      x += colW.table;
+      // Titre du cycle
+      drawBox(margin, cy, boxWidth, 22, '#e5e7eb');
+      drawText(`CYCLE ${cycleNum}`, margin + 10, cy + 11, { size: 11, bold: true });
+      cy += 22;
       
-      // Équipe A
-      if (rowData.orderA !== undefined) drawCell(x, rowY, colW.order, rowH, rowData.orderA, { size: 7, bold: !!rowData.orderA });
-      x += colW.order;
-      if (rowData.factionA !== undefined) drawCell(x, rowY, colW.faction, rowH, rowData.factionA, { size: 6 });
-      x += colW.faction;
-      if (rowData.nameA !== undefined) drawCell(x, rowY, colW.name, rowH, rowData.nameA, { size: 7 });
-      x += colW.name;
-      if (rowData.pseudoA !== undefined) drawCell(x, rowY, colW.pseudo, rowH, rowData.pseudoA, { size: 7 });
-      x += colW.pseudo;
-      if (rowData.ptsA !== undefined) drawCell(x, rowY, colW.pts, rowH, rowData.ptsA, { size: 8 });
-      x += colW.pts;
-      if (rowData.scoreA !== undefined) drawCell(x, rowY, colW.score, rowH, rowData.scoreA, { size: 9, bold: true });
-      x += colW.score;
-      if (rowData.penalA !== undefined) drawCell(x, rowY, colW.penal, rowH, rowData.penalA, { size: 8 });
-      x += colW.penal;
-      if (rowData.advA !== undefined) drawCell(x, rowY, colW.adv, rowH, rowData.advA, { size: 7, bold: rowData.advA === 'Oui' });
-      x += colW.adv;
+      // Défenseurs
+      drawText('DÉFENSEURS', margin + 10, cy + 15, { size: 9, bold: true, color: colors.gray });
+      cy += 25;
       
-      // Équipe B
-      if (rowData.advB !== undefined) drawCell(x, rowY, colW.adv, rowH, rowData.advB, { size: 7, bold: rowData.advB === 'Oui' });
-      x += colW.adv;
-      if (rowData.penalB !== undefined) drawCell(x, rowY, colW.penal, rowH, rowData.penalB, { size: 8 });
-      x += colW.penal;
-      if (rowData.scoreB !== undefined) drawCell(x, rowY, colW.score, rowH, rowData.scoreB, { size: 9, bold: true });
-      x += colW.score;
-      if (rowData.ptsB !== undefined) drawCell(x, rowY, colW.pts, rowH, rowData.ptsB, { size: 8 });
-      x += colW.pts;
-      if (rowData.pseudoB !== undefined) drawCell(x, rowY, colW.pseudo, rowH, rowData.pseudoB, { size: 7 });
-      x += colW.pseudo;
-      if (rowData.nameB !== undefined) drawCell(x, rowY, colW.name, rowH, rowData.nameB, { size: 7 });
-      x += colW.name;
-      if (rowData.factionB !== undefined) drawCell(x, rowY, colW.faction, rowH, rowData.factionB, { size: 6 });
-      x += colW.faction;
-      if (rowData.orderB !== undefined) drawCell(x, rowY, colW.order, rowH, rowData.orderB, { size: 7, bold: !!rowData.orderB });
+      const ourDef = getPlayer('us', cycleData.usDefender);
+      const theirDef = getPlayer('them', cycleData.themDefender);
+      
+      // Box Notre défenseur
+      drawBox(margin + 10, cy, halfWidth, 28, '#dbeafe');
+      drawText('🔵 Notre Def:', margin + 15, cy + 14, { size: 9, color: colors.blue });
+      drawText(formatPlayer(ourDef), margin + 85, cy + 14, { size: 9, bold: true });
+      
+      // Box Leur défenseur
+      drawBox(margin + halfWidth + 20, cy, halfWidth, 28, '#fee2e2');
+      drawText('🔴 Leur Def:', margin + halfWidth + 25, cy + 14, { size: 9, color: colors.red });
+      drawText(formatPlayer(theirDef), margin + halfWidth + 95, cy + 14, { size: 9, bold: true });
+      cy += 35;
+      
+      // Attaquants
+      drawText('ATTAQUANTS PROPOSÉS', margin + 10, cy + 8, { size: 9, bold: true, color: colors.gray });
+      cy += 18;
+      
+      const ourAtt1 = getPlayer('us', cycleData.usAttackers?.[0]);
+      const ourAtt2 = getPlayer('us', cycleData.usAttackers?.[1]);
+      const theirAtt1 = getPlayer('them', cycleData.themAttackers?.[0]);
+      const theirAtt2 = getPlayer('them', cycleData.themAttackers?.[1]);
+      
+      const ourChosen = cycleData.usChosenAttacker;
+      const theirChosen = cycleData.themChosenAttacker;
+      
+      // Nos attaquants
+      drawBox(margin + 10, cy, halfWidth, 45);
+      drawText(`🔵 Att1: ${formatPlayer(ourAtt1)}`, margin + 15, cy + 12, { size: 9 });
+      if (ourChosen === cycleData.usAttackers?.[0]) drawText('✓', margin + halfWidth - 10, cy + 12, { size: 10, color: colors.green, bold: true });
+      drawText(`🔵 Att2: ${formatPlayer(ourAtt2)}`, margin + 15, cy + 32, { size: 9 });
+      if (ourChosen === cycleData.usAttackers?.[1]) drawText('✓', margin + halfWidth - 10, cy + 32, { size: 10, color: colors.green, bold: true });
+      
+      // Leurs attaquants
+      drawBox(margin + halfWidth + 20, cy, halfWidth, 45);
+      drawText(`🔴 Att1: ${formatPlayer(theirAtt1)}`, margin + halfWidth + 25, cy + 12, { size: 9 });
+      if (theirChosen === cycleData.themAttackers?.[0]) drawText('✓', margin + boxWidth - 15, cy + 12, { size: 10, color: colors.green, bold: true });
+      drawText(`🔴 Att2: ${formatPlayer(theirAtt2)}`, margin + halfWidth + 25, cy + 32, { size: 9 });
+      if (theirChosen === cycleData.themAttackers?.[1]) drawText('✓', margin + boxWidth - 15, cy + 32, { size: 10, color: colors.green, bold: true });
+      
+      cy += 50;
+      drawText('(✓ = choisi par l\'adversaire)', margin + boxWidth - 120, cy, { size: 7, color: colors.gray });
+      cy += 12;
+      
+      // Duels résultants
+      drawText('DUELS RÉSULTANTS', margin + 10, cy + 8, { size: 9, bold: true, color: colors.gray });
+      cy += 18;
+      
+      // Table header
+      const colWidths = [45, 250, 50, 80];
+      let cx = margin + 10;
+      drawBox(cx, cy, colWidths[0], 20, colors.lightGray); drawText('Table', cx + colWidths[0]/2, cy + 10, { size: 8, bold: true, align: 'center' });
+      cx += colWidths[0];
+      drawBox(cx, cy, colWidths[1], 20, colors.lightGray); drawText('Duel', cx + colWidths[1]/2, cy + 10, { size: 8, bold: true, align: 'center' });
+      cx += colWidths[1];
+      drawBox(cx, cy, colWidths[2], 20, colors.lightGray); drawText('Match', cx + colWidths[2]/2, cy + 10, { size: 8, bold: true, align: 'center' });
+      cx += colWidths[2];
+      drawBox(cx, cy, colWidths[3], 20, colors.lightGray); drawText('Score', cx + colWidths[3]/2, cy + 10, { size: 8, bold: true, align: 'center' });
+      cy += 20;
+      
+      // Duel 1: Notre défenseur vs leur attaquant choisi
+      const duel1Us = cycleData.usDefender;
+      const duel1Them = theirChosen;
+      const duel1 = fixedDuels.find(d => d.us === duel1Us && d.them === duel1Them);
+      const duel1Score = duelScores.find((s, i) => fixedDuels[i]?.us === duel1Us && fixedDuels[i]?.them === duel1Them);
+      const symbol1 = getMatrixValue(matrix, duel1Us, duel1Them);
+      
+      cx = margin + 10;
+      drawBox(cx, cy, colWidths[0], 24); drawText(duel1?.table || '', cx + colWidths[0]/2, cy + 12, { size: 9, bold: true, align: 'center' });
+      cx += colWidths[0];
+      drawBox(cx, cy, colWidths[1], 24); 
+      drawText(`🔵 ${formatPlayer(ourDef)}  vs  🔴 ${formatPlayer(getPlayer('them', duel1Them))}`, cx + 5, cy + 12, { size: 8 });
+      cx += colWidths[1];
+      drawBox(cx, cy, colWidths[2], 24); drawText(symbol1, cx + colWidths[2]/2, cy + 12, { size: 10, bold: true, align: 'center' });
+      cx += colWidths[2];
+      drawBox(cx, cy, colWidths[3], 24);
+      const score1Text = duel1Score?.ourScore !== null && duel1Score?.ourScore !== undefined ? `${duel1Score.ourScore} - ${duel1Score.theirScore}` : '__ - __';
+      drawText(score1Text, cx + colWidths[3]/2, cy + 12, { size: 9, align: 'center' });
+      cy += 24;
+      
+      // Duel 2: Notre attaquant choisi vs leur défenseur
+      const duel2Us = ourChosen;
+      const duel2Them = cycleData.themDefender;
+      const duel2 = fixedDuels.find(d => d.us === duel2Us && d.them === duel2Them);
+      const duel2Score = duelScores.find((s, i) => fixedDuels[i]?.us === duel2Us && fixedDuels[i]?.them === duel2Them);
+      const symbol2 = getMatrixValue(matrix, duel2Us, duel2Them);
+      
+      cx = margin + 10;
+      drawBox(cx, cy, colWidths[0], 24); drawText(duel2?.table || '', cx + colWidths[0]/2, cy + 12, { size: 9, bold: true, align: 'center' });
+      cx += colWidths[0];
+      drawBox(cx, cy, colWidths[1], 24);
+      drawText(`🔵 ${formatPlayer(getPlayer('us', duel2Us))}  vs  🔴 ${formatPlayer(theirDef)}`, cx + 5, cy + 12, { size: 8 });
+      cx += colWidths[1];
+      drawBox(cx, cy, colWidths[2], 24); drawText(symbol2, cx + colWidths[2]/2, cy + 12, { size: 10, bold: true, align: 'center' });
+      cx += colWidths[2];
+      drawBox(cx, cy, colWidths[3], 24);
+      const score2Text = duel2Score?.ourScore !== null && duel2Score?.ourScore !== undefined ? `${duel2Score.ourScore} - ${duel2Score.theirScore}` : '__ - __';
+      drawText(score2Text, cx + colWidths[3]/2, cy + 12, { size: 9, align: 'center' });
+      cy += 24;
+      
+      return cy + 10;
     };
     
-    // Fonction pour dessiner une ligne Def avec cellules fusionnées (2 sous-lignes côté adverse)
-    const renderDefRow = (defData, attData1, attData2, rowY) => {
-      const halfH = rowHeight;
-      const fullH = rowHeight * 2;
-      let x = tableX;
-      
-      // Numéro de table (fusionné)
-      drawCell(x, rowY, colW.table, fullH, '', { size: 9 });
-      x += colW.table;
-      
-      // Côté défenseur (cellules fusionnées sur 2 lignes)
-      drawCell(x, rowY, colW.order, fullH, defData.order, { size: 7, bold: true });
-      x += colW.order;
-      drawCell(x, rowY, colW.faction, fullH, defData.faction, { size: 6 });
-      x += colW.faction;
-      drawCell(x, rowY, colW.name, fullH, '', { size: 7 });
-      x += colW.name;
-      drawCell(x, rowY, colW.pseudo, fullH, defData.pseudo, { size: 7 });
-      x += colW.pseudo;
-      drawCell(x, rowY, colW.pts, fullH, '', { size: 8 });
-      x += colW.pts;
-      drawCell(x, rowY, colW.score, fullH, '', { size: 9, bold: true });
-      x += colW.score;
-      drawCell(x, rowY, colW.penal, fullH, '', { size: 8 });
-      x += colW.penal;
-      drawCell(x, rowY, colW.adv, fullH, 'NA', { size: 7 });
-      x += colW.adv;
-      
-      // Côté attaquants (2 lignes séparées)
-      // Ligne 1 - Att1A ou Att2A
-      drawCell(x, rowY, colW.adv, halfH, attData1.adv, { size: 7, bold: attData1.adv === 'Oui' });
-      drawCell(x + colW.adv, rowY, colW.penal, halfH, '', { size: 8 });
-      drawCell(x + colW.adv + colW.penal, rowY, colW.score, halfH, '', { size: 9 });
-      drawCell(x + colW.adv + colW.penal + colW.score, rowY, colW.pts, halfH, '', { size: 8 });
-      drawCell(x + colW.adv + colW.penal + colW.score + colW.pts, rowY, colW.pseudo, halfH, attData1.pseudo, { size: 7 });
-      drawCell(x + colW.adv + colW.penal + colW.score + colW.pts + colW.pseudo, rowY, colW.name, halfH, '', { size: 7 });
-      drawCell(x + colW.adv + colW.penal + colW.score + colW.pts + colW.pseudo + colW.name, rowY, colW.faction, halfH, attData1.faction, { size: 6 });
-      drawCell(x + colW.adv + colW.penal + colW.score + colW.pts + colW.pseudo + colW.name + colW.faction, rowY, colW.order, halfH, attData1.order, { size: 7, bold: true });
-      
-      // Ligne 2 - Att1B ou Att2B
-      const rowY2 = rowY + halfH;
-      drawCell(x, rowY2, colW.adv, halfH, attData2.adv, { size: 7, bold: attData2.adv === 'Oui' });
-      drawCell(x + colW.adv, rowY2, colW.penal, halfH, '', { size: 8 });
-      drawCell(x + colW.adv + colW.penal, rowY2, colW.score, halfH, '', { size: 9 });
-      drawCell(x + colW.adv + colW.penal + colW.score, rowY2, colW.pts, halfH, '', { size: 8 });
-      drawCell(x + colW.adv + colW.penal + colW.score + colW.pts, rowY2, colW.pseudo, halfH, attData2.pseudo, { size: 7 });
-      drawCell(x + colW.adv + colW.penal + colW.score + colW.pts + colW.pseudo, rowY2, colW.name, halfH, '', { size: 7 });
-      drawCell(x + colW.adv + colW.penal + colW.score + colW.pts + colW.pseudo + colW.name, rowY2, colW.faction, halfH, attData2.faction, { size: 6 });
-      drawCell(x + colW.adv + colW.penal + colW.score + colW.pts + colW.pseudo + colW.name + colW.faction, rowY2, colW.order, halfH, attData2.order, { size: 7, bold: true });
-      
-      return fullH;
-    };
+    // === CYCLE 1 ===
+    y = drawCycle(1, details.cycle1, y);
     
-    // Fonction pour ligne Att simple (face au Def adverse)
-    const renderAttRow = (attData, defData, tableNum, rowY) => {
-      let x = tableX;
-      
-      drawCell(x, rowY, colW.table, rowHeight, tableNum, { size: 9, bold: true });
-      x += colW.table;
-      
-      // Notre attaquant
-      drawCell(x, rowY, colW.order, rowHeight, attData.order, { size: 7, bold: true });
-      x += colW.order;
-      drawCell(x, rowY, colW.faction, rowHeight, attData.faction, { size: 6 });
-      x += colW.faction;
-      drawCell(x, rowY, colW.name, rowHeight, '', { size: 7 });
-      x += colW.name;
-      drawCell(x, rowY, colW.pseudo, rowHeight, attData.pseudo, { size: 7 });
-      x += colW.pseudo;
-      drawCell(x, rowY, colW.pts, rowHeight, '', { size: 8 });
-      x += colW.pts;
-      drawCell(x, rowY, colW.score, rowHeight, attData.score || '', { size: 9, bold: true });
-      x += colW.score;
-      drawCell(x, rowY, colW.penal, rowHeight, '', { size: 8 });
-      x += colW.penal;
-      drawCell(x, rowY, colW.adv, rowHeight, attData.adv, { size: 7, bold: attData.adv === 'Oui' });
-      x += colW.adv;
-      
-      // Défenseur adverse
-      drawCell(x, rowY, colW.adv, rowHeight, 'NA', { size: 7 });
-      x += colW.adv;
-      drawCell(x, rowY, colW.penal, rowHeight, '', { size: 8 });
-      x += colW.penal;
-      drawCell(x, rowY, colW.score, rowHeight, defData.score || '', { size: 9, bold: true });
-      x += colW.score;
-      drawCell(x, rowY, colW.pts, rowHeight, '', { size: 8 });
-      x += colW.pts;
-      drawCell(x, rowY, colW.pseudo, rowHeight, defData.pseudo, { size: 7 });
-      x += colW.pseudo;
-      drawCell(x, rowY, colW.name, rowHeight, '', { size: 7 });
-      x += colW.name;
-      drawCell(x, rowY, colW.faction, rowHeight, defData.faction, { size: 6 });
-      x += colW.faction;
-      drawCell(x, rowY, colW.order, rowHeight, defData.order, { size: 7, bold: true });
-      
-      return rowHeight;
-    };
+    // === CYCLE 2 ===
+    y = drawCycle(2, details.cycle2, y);
     
-    // Fonction pour lignes spéciales (Oublié, Refusé)
-    const renderSpecialRow = (labelA, playerA, labelB, playerB, tableNum, rowY) => {
-      let x = tableX;
-      
-      drawCell(x, rowY, colW.table, rowHeight, tableNum, { size: 9, bold: true });
-      x += colW.table;
-      
-      // Équipe A
-      drawCell(x, rowY, colW.order, rowHeight, labelA, { size: 7, bold: true });
-      x += colW.order;
-      drawCell(x, rowY, colW.faction, rowHeight, playerA?.faction || '', { size: 6 });
-      x += colW.faction;
-      drawCell(x, rowY, colW.name, rowHeight, '', { size: 7 });
-      x += colW.name;
-      drawCell(x, rowY, colW.pseudo, rowHeight, playerA?.pseudo || '', { size: 7 });
-      x += colW.pseudo;
-      drawCell(x, rowY, colW.pts, rowHeight, '', { size: 8 });
-      x += colW.pts;
-      drawCell(x, rowY, colW.score, rowHeight, '', { size: 9 });
-      x += colW.score;
-      drawCell(x, rowY, colW.penal, rowHeight, '', { size: 8 });
-      x += colW.penal;
-      drawCell(x, rowY, colW.adv, rowHeight, 'NA', { size: 7 });
-      x += colW.adv;
-      
-      // Équipe B
-      drawCell(x, rowY, colW.adv, rowHeight, 'NA', { size: 7 });
-      x += colW.adv;
-      drawCell(x, rowY, colW.penal, rowHeight, '', { size: 8 });
-      x += colW.penal;
-      drawCell(x, rowY, colW.score, rowHeight, '', { size: 9 });
-      x += colW.score;
-      drawCell(x, rowY, colW.pts, rowHeight, '', { size: 8 });
-      x += colW.pts;
-      drawCell(x, rowY, colW.pseudo, rowHeight, playerB?.pseudo || '', { size: 7 });
-      x += colW.pseudo;
-      drawCell(x, rowY, colW.name, rowHeight, '', { size: 7 });
-      x += colW.name;
-      drawCell(x, rowY, colW.faction, rowHeight, playerB?.faction || '', { size: 6 });
-      x += colW.faction;
-      drawCell(x, rowY, colW.order, rowHeight, labelB, { size: 7, bold: true });
-      
-      return rowHeight;
-    };
+    // === DUELS SPÉCIAUX ===
+    const boxWidth = baseWidth - 2 * margin;
+    drawBox(margin, y, boxWidth, 22, '#e5e7eb');
+    drawText('DUELS SPÉCIAUX', margin + 10, y + 11, { size: 11, bold: true });
+    y += 22;
     
-    // === RENDU DES LIGNES ===
+    // Table header
+    const colWidths = [45, 250, 50, 80];
+    let cx = margin + 10;
+    drawBox(cx, y, colWidths[0], 20, colors.lightGray); drawText('Table', cx + colWidths[0]/2, y + 10, { size: 8, bold: true, align: 'center' });
+    cx += colWidths[0];
+    drawBox(cx, y, colWidths[1], 20, colors.lightGray); drawText('Duel', cx + colWidths[1]/2, y + 10, { size: 8, bold: true, align: 'center' });
+    cx += colWidths[1];
+    drawBox(cx, y, colWidths[2], 20, colors.lightGray); drawText('Match', cx + colWidths[2]/2, y + 10, { size: 8, bold: true, align: 'center' });
+    cx += colWidths[2];
+    drawBox(cx, y, colWidths[3], 20, colors.lightGray); drawText('Score', cx + colWidths[3]/2, y + 10, { size: 8, bold: true, align: 'center' });
+    y += 20;
     
-    if (weAreTeam === 'A') {
-      // Nous sommes équipe A (gauche)
-      
-      // DEF1 - Notre défenseur face à leurs 2 attaquants
-      const def1Player = getPlayer('us', c1.usDefender);
-      const theirAtt1A = getPlayer('them', c1.themAttackers?.[0]);
-      const theirAtt1B = getPlayer('them', c1.themAttackers?.[1]);
-      y += renderDefRow(
-        { order: 'Def1', faction: def1Player?.faction || '', pseudo: def1Player?.pseudo || '' },
-        { order: 'Att1A', faction: theirAtt1A?.faction || '', pseudo: theirAtt1A?.pseudo || '', adv: c1.themChosenAttacker === c1.themAttackers?.[0] ? 'Oui' : 'Non' },
-        { order: 'Att1B', faction: theirAtt1B?.faction || '', pseudo: theirAtt1B?.pseudo || '', adv: c1.themChosenAttacker === c1.themAttackers?.[1] ? 'Oui' : 'Non' },
-        y
-      );
-      
-      // ATT1A - Notre attaquant choisi face à leur défenseur
-      const ourAtt1AIdx = c1.usAttackers?.[0];
-      const ourAtt1A = getPlayer('us', ourAtt1AIdx);
-      const theirDef1 = getPlayer('them', c1.themDefender);
-      const att1ATable = fixedDuels.find(d => d.us === c1.usChosenAttacker && d.them === c1.themDefender)?.table || '';
-      y += renderAttRow(
-        { order: 'Att1A', faction: ourAtt1A?.faction || '', pseudo: ourAtt1A?.pseudo || '', adv: c1.usChosenAttacker === ourAtt1AIdx ? 'Oui' : 'Non' },
-        { order: 'Def1', faction: theirDef1?.faction || '', pseudo: theirDef1?.pseudo || '' },
-        att1ATable,
-        y
-      );
-      
-      // ATT1B - Notre autre attaquant
-      const ourAtt1BIdx = c1.usAttackers?.[1];
-      const ourAtt1B = getPlayer('us', ourAtt1BIdx);
-      y += renderAttRow(
-        { order: 'Att1B', faction: ourAtt1B?.faction || '', pseudo: ourAtt1B?.pseudo || '', adv: c1.usChosenAttacker === ourAtt1BIdx ? 'Oui' : 'Non' },
-        { order: '', faction: '', pseudo: '' },
-        '',
-        y
-      );
-      
-      // DEF2 - Notre défenseur 2 face à leurs 2 attaquants
-      const def2Player = getPlayer('us', c2.usDefender);
-      const theirAtt2A = getPlayer('them', c2.themAttackers?.[0]);
-      const theirAtt2B = getPlayer('them', c2.themAttackers?.[1]);
-      y += renderDefRow(
-        { order: 'Def2', faction: def2Player?.faction || '', pseudo: def2Player?.pseudo || '' },
-        { order: 'Att2A', faction: theirAtt2A?.faction || '', pseudo: theirAtt2A?.pseudo || '', adv: c2.themChosenAttacker === c2.themAttackers?.[0] ? 'Oui' : 'Non' },
-        { order: 'Att2B', faction: theirAtt2B?.faction || '', pseudo: theirAtt2B?.pseudo || '', adv: c2.themChosenAttacker === c2.themAttackers?.[1] ? 'Oui' : 'Non' },
-        y
-      );
-      
-      // ATT2A
-      const ourAtt2AIdx = c2.usAttackers?.[0];
-      const ourAtt2A = getPlayer('us', ourAtt2AIdx);
-      const theirDef2 = getPlayer('them', c2.themDefender);
-      const att2ATable = fixedDuels.find(d => d.us === c2.usChosenAttacker && d.them === c2.themDefender)?.table || '';
-      y += renderAttRow(
-        { order: 'Att2A', faction: ourAtt2A?.faction || '', pseudo: ourAtt2A?.pseudo || '', adv: c2.usChosenAttacker === ourAtt2AIdx ? 'Oui' : 'Non' },
-        { order: 'Def2', faction: theirDef2?.faction || '', pseudo: theirDef2?.pseudo || '' },
-        att2ATable,
-        y
-      );
-      
-      // ATT2B
-      const ourAtt2BIdx = c2.usAttackers?.[1];
-      const ourAtt2B = getPlayer('us', ourAtt2BIdx);
-      y += renderAttRow(
-        { order: 'Att2B', faction: ourAtt2B?.faction || '', pseudo: ourAtt2B?.pseudo || '', adv: c2.usChosenAttacker === ourAtt2BIdx ? 'Oui' : 'Non' },
-        { order: '', faction: '', pseudo: '' },
-        '',
-        y
-      );
-      
-      // Refusé
-      const refusedTable = fixedDuels.find(d => d.type === 'refused')?.table || '';
-      const ourRefused = getPlayer('us', details.refused?.us);
-      const theirRefused = getPlayer('them', details.refused?.them);
-      y += renderSpecialRow('Refusé', ourRefused, 'Refusé', theirRefused, refusedTable, y);
-      
-      // Oublié
-      const forgottenTable = fixedDuels.find(d => d.type === 'forgotten')?.table || '';
-      const ourForgotten = getPlayer('us', details.forgotten?.us);
-      const theirForgotten = getPlayer('them', details.forgotten?.them);
-      y += renderSpecialRow('Oublié', ourForgotten, 'Oublié', theirForgotten, forgottenTable, y);
-      
-    } else {
-      // Nous sommes équipe B (droite), adversaire est équipe A (gauche)
-      
-      // DEF1 adverse face à nos 2 attaquants
-      const theirDef1 = getPlayer('them', c1.themDefender);
-      const ourAtt1A = getPlayer('us', c1.usAttackers?.[0]);
-      const ourAtt1B = getPlayer('us', c1.usAttackers?.[1]);
-      y += renderDefRow(
-        { order: 'Def1', faction: theirDef1?.faction || '', pseudo: theirDef1?.pseudo || '' },
-        { order: 'Att1A', faction: ourAtt1A?.faction || '', pseudo: ourAtt1A?.pseudo || '', adv: c1.usChosenAttacker === c1.usAttackers?.[0] ? 'Oui' : 'Non' },
-        { order: 'Att1B', faction: ourAtt1B?.faction || '', pseudo: ourAtt1B?.pseudo || '', adv: c1.usChosenAttacker === c1.usAttackers?.[1] ? 'Oui' : 'Non' },
-        y
-      );
-      
-      // ATT1A adverse face à notre Def1
-      const theirAtt1AIdx = c1.themAttackers?.[0];
-      const theirAtt1A = getPlayer('them', theirAtt1AIdx);
-      const ourDef1 = getPlayer('us', c1.usDefender);
-      const att1ATable = fixedDuels.find(d => d.us === c1.usDefender && d.them === c1.themChosenAttacker)?.table || '';
-      y += renderAttRow(
-        { order: 'Att1A', faction: theirAtt1A?.faction || '', pseudo: theirAtt1A?.pseudo || '', adv: c1.themChosenAttacker === theirAtt1AIdx ? 'Oui' : 'Non' },
-        { order: 'Def1', faction: ourDef1?.faction || '', pseudo: ourDef1?.pseudo || '' },
-        att1ATable,
-        y
-      );
-      
-      // ATT1B adverse
-      const theirAtt1BIdx = c1.themAttackers?.[1];
-      const theirAtt1B = getPlayer('them', theirAtt1BIdx);
-      y += renderAttRow(
-        { order: 'Att1B', faction: theirAtt1B?.faction || '', pseudo: theirAtt1B?.pseudo || '', adv: c1.themChosenAttacker === theirAtt1BIdx ? 'Oui' : 'Non' },
-        { order: '', faction: '', pseudo: '' },
-        '',
-        y
-      );
-      
-      // DEF2 adverse
-      const theirDef2 = getPlayer('them', c2.themDefender);
-      const ourAtt2A = getPlayer('us', c2.usAttackers?.[0]);
-      const ourAtt2B = getPlayer('us', c2.usAttackers?.[1]);
-      y += renderDefRow(
-        { order: 'Def2', faction: theirDef2?.faction || '', pseudo: theirDef2?.pseudo || '' },
-        { order: 'Att2A', faction: ourAtt2A?.faction || '', pseudo: ourAtt2A?.pseudo || '', adv: c2.usChosenAttacker === c2.usAttackers?.[0] ? 'Oui' : 'Non' },
-        { order: 'Att2B', faction: ourAtt2B?.faction || '', pseudo: ourAtt2B?.pseudo || '', adv: c2.usChosenAttacker === c2.usAttackers?.[1] ? 'Oui' : 'Non' },
-        y
-      );
-      
-      // ATT2A adverse
-      const theirAtt2AIdx = c2.themAttackers?.[0];
-      const theirAtt2A = getPlayer('them', theirAtt2AIdx);
-      const ourDef2 = getPlayer('us', c2.usDefender);
-      const att2ATable = fixedDuels.find(d => d.us === c2.usDefender && d.them === c2.themChosenAttacker)?.table || '';
-      y += renderAttRow(
-        { order: 'Att2A', faction: theirAtt2A?.faction || '', pseudo: theirAtt2A?.pseudo || '', adv: c2.themChosenAttacker === theirAtt2AIdx ? 'Oui' : 'Non' },
-        { order: 'Def2', faction: ourDef2?.faction || '', pseudo: ourDef2?.pseudo || '' },
-        att2ATable,
-        y
-      );
-      
-      // ATT2B adverse
-      const theirAtt2BIdx = c2.themAttackers?.[1];
-      const theirAtt2B = getPlayer('them', theirAtt2BIdx);
-      y += renderAttRow(
-        { order: 'Att2B', faction: theirAtt2B?.faction || '', pseudo: theirAtt2B?.pseudo || '', adv: c2.themChosenAttacker === theirAtt2BIdx ? 'Oui' : 'Non' },
-        { order: '', faction: '', pseudo: '' },
-        '',
-        y
-      );
-      
-      // Refusé
-      const refusedTable = fixedDuels.find(d => d.type === 'refused')?.table || '';
-      const theirRefused = getPlayer('them', details.refused?.them);
-      const ourRefused = getPlayer('us', details.refused?.us);
-      y += renderSpecialRow('Refusé', theirRefused, 'Refusé', ourRefused, refusedTable, y);
-      
-      // Oublié
-      const forgottenTable = fixedDuels.find(d => d.type === 'forgotten')?.table || '';
-      const theirForgotten = getPlayer('them', details.forgotten?.them);
-      const ourForgotten = getPlayer('us', details.forgotten?.us);
-      y += renderSpecialRow('Oublié', theirForgotten, 'Oublié', ourForgotten, forgottenTable, y);
+    // Oublié
+    const forgottenDuel = fixedDuels.find(d => d.type === 'forgotten');
+    const forgottenScore = forgottenDuel ? duelScores[fixedDuels.indexOf(forgottenDuel)] : null;
+    const forgottenSymbol = forgottenDuel ? getMatrixValue(matrix, forgottenDuel.us, forgottenDuel.them) : '=';
+    
+    cx = margin + 10;
+    drawBox(cx, y, colWidths[0], 24); drawText(forgottenDuel?.table || '', cx + colWidths[0]/2, y + 12, { size: 9, bold: true, align: 'center' });
+    cx += colWidths[0];
+    drawBox(cx, y, colWidths[1], 24);
+    drawText(`👻 OUBLIÉ: 🔵 ${formatPlayer(getPlayer('us', details.forgotten?.us))}  vs  🔴 ${formatPlayer(getPlayer('them', details.forgotten?.them))}`, cx + 5, y + 12, { size: 8 });
+    cx += colWidths[1];
+    drawBox(cx, y, colWidths[2], 24); drawText(forgottenSymbol, cx + colWidths[2]/2, y + 12, { size: 10, bold: true, align: 'center' });
+    cx += colWidths[2];
+    drawBox(cx, y, colWidths[3], 24);
+    const forgottenScoreText = forgottenScore?.ourScore !== null && forgottenScore?.ourScore !== undefined ? `${forgottenScore.ourScore} - ${forgottenScore.theirScore}` : '__ - __';
+    drawText(forgottenScoreText, cx + colWidths[3]/2, y + 12, { size: 9, align: 'center' });
+    y += 24;
+    
+    // Refusé
+    const refusedDuel = fixedDuels.find(d => d.type === 'refused');
+    const refusedScore = refusedDuel ? duelScores[fixedDuels.indexOf(refusedDuel)] : null;
+    const refusedSymbol = refusedDuel ? getMatrixValue(matrix, refusedDuel.us, refusedDuel.them) : '=';
+    
+    cx = margin + 10;
+    drawBox(cx, y, colWidths[0], 24); drawText(refusedDuel?.table || '', cx + colWidths[0]/2, y + 12, { size: 9, bold: true, align: 'center' });
+    cx += colWidths[0];
+    drawBox(cx, y, colWidths[1], 24);
+    drawText(`🚫 REFUSÉ: 🔵 ${formatPlayer(getPlayer('us', details.refused?.us))}  vs  🔴 ${formatPlayer(getPlayer('them', details.refused?.them))}`, cx + 5, y + 12, { size: 8 });
+    cx += colWidths[1];
+    drawBox(cx, y, colWidths[2], 24); drawText(refusedSymbol, cx + colWidths[2]/2, y + 12, { size: 10, bold: true, align: 'center' });
+    cx += colWidths[2];
+    drawBox(cx, y, colWidths[3], 24);
+    const refusedScoreText = refusedScore?.ourScore !== null && refusedScore?.ourScore !== undefined ? `${refusedScore.ourScore} - ${refusedScore.theirScore}` : '__ - __';
+    drawText(refusedScoreText, cx + colWidths[3]/2, y + 12, { size: 9, align: 'center' });
+    y += 34;
+    
+    // === RÉCAPITULATIF ===
+    drawBox(margin, y, boxWidth, 70, '#f9fafb');
+    drawText('RÉCAPITULATIF', margin + 10, y + 15, { size: 11, bold: true });
+    
+    // Calculer le score réel si disponible
+    const hasAllScores = duelScores.length === 6 && duelScores.every(s => s?.ourScore !== null && s?.ourScore !== undefined);
+    let totalUs = 0, totalThem = 0;
+    if (hasAllScores) {
+      duelScores.forEach(s => {
+        totalUs += s.ourScore || 0;
+        totalThem += s.theirScore || 0;
+      });
     }
     
-    // === LIGNE DES TOTAUX ===
-    y += 10;
-    drawText('Signature du Capitaine', tableX + colW.table + 80, y + 15, { size: 8, align: 'center' });
-    drawText('Total /600', tableX + colW.table + sideWidth - 60, y + 8, { size: 7 });
-    drawText('Total /120', tableX + colW.table + sideWidth - 20, y + 8, { size: 7 });
+    drawText('Score Réel:', margin + 20, y + 38, { size: 10 });
+    const scoreText = hasAllScores ? `${totalUs} / 120  vs  ${totalThem} / 120` : '__ / 120  vs  __ / 120';
+    drawText(scoreText, margin + 100, y + 38, { size: 12, bold: true });
     
-    drawText('Point de tournoi: Victoire 2 (65+) | Égalité 1 (55-65) | Défaite 0 (<55)', baseWidth / 2, y + 15, { size: 7, align: 'center' });
+    // Cases à cocher
+    drawText('Résultat:', margin + 280, y + 38, { size: 10 });
     
-    drawText('Total /120', tableX + colW.table + sideWidth + colW.adv * 2 + 20, y + 8, { size: 7 });
-    drawText('Total /600', tableX + colW.table + sideWidth + colW.adv * 2 + 60, y + 8, { size: 7 });
-    drawText('Signature du Capitaine', tableX + totalWidth - 80, y + 15, { size: 8, align: 'center' });
+    const isVictory = hasAllScores && totalUs > 65;
+    const isDraw = hasAllScores && totalUs >= 55 && totalUs <= 65;
+    const isDefeat = hasAllScores && totalUs < 55;
+    
+    // Victoire
+    drawBox(margin + 340, y + 30, 14, 14);
+    if (isVictory) drawText('✓', margin + 347, y + 37, { size: 10, bold: true });
+    drawText('Victoire (>65)', margin + 360, y + 38, { size: 9 });
+    
+    // Égalité
+    drawBox(margin + 430, y + 30, 14, 14);
+    if (isDraw) drawText('✓', margin + 437, y + 37, { size: 10, bold: true });
+    drawText('Égalité (55-65)', margin + 450, y + 38, { size: 9 });
+    
+    // Défaite
+    drawBox(margin + 340, y + 50, 14, 14);
+    if (isDefeat) drawText('✓', margin + 347, y + 57, { size: 10, bold: true });
+    drawText('Défaite (<55)', margin + 360, y + 58, { size: 9 });
     
     // Export
     const imgData = canvas.toDataURL('image/png');
@@ -3408,6 +3157,7 @@ function PairingEngine() {
     link.href = imgData;
     link.click();
   };
+  
   
   // ============================================
   // MAIN RENDER
