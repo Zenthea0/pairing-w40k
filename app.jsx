@@ -602,6 +602,58 @@ const calculateTeamScore = (duels, matrix) => {
   }, 0);
 };
 
+// Calcule les meilleures combinaisons de pairing restantes
+const calculateBestRemainingCombinations = (state, matrix, maxResults = 25) => {
+  if (!state || !matrix) return [];
+  
+  // Joueurs déjà fixés
+  const fixedUs = state.fixedDuels.map(d => d.us);
+  const fixedThem = state.fixedDuels.map(d => d.them);
+  
+  // Score des duels déjà fixés
+  const fixedScore = calculateTeamScore(state.fixedDuels, matrix);
+  
+  // Joueurs restants disponibles
+  const remainingUs = [0, 1, 2, 3, 4, 5].filter(i => !fixedUs.includes(i));
+  const remainingThem = [0, 1, 2, 3, 4, 5].filter(i => !fixedThem.includes(i));
+  
+  // Si pairing terminé ou pas de joueurs restants
+  if (remainingUs.length === 0 || remainingThem.length === 0) {
+    return [{
+      duels: state.fixedDuels.map(d => ({ us: d.us, them: d.them })),
+      score: fixedScore,
+      isComplete: true
+    }];
+  }
+  
+  // Générer toutes les permutations des joueurs adverses restants
+  const theirPermutations = permutations(remainingThem);
+  
+  // Calculer le score pour chaque combinaison
+  const combinations = theirPermutations.map(theirOrder => {
+    const newDuels = remainingUs.map((ourIdx, i) => ({
+      us: ourIdx,
+      them: theirOrder[i]
+    }));
+    
+    const additionalScore = newDuels.reduce((sum, d) => {
+      return sum + symbolToScore(getMatrixValue(matrix, d.us, d.them));
+    }, 0);
+    
+    return {
+      duels: [...state.fixedDuels.map(d => ({ us: d.us, them: d.them, fixed: true })), ...newDuels],
+      score: fixedScore + additionalScore,
+      fixedScore,
+      additionalScore,
+      newDuels
+    };
+  });
+  
+  // Trier par score décroissant et limiter aux maxResults premiers
+  combinations.sort((a, b) => b.score - a.score);
+  return combinations.slice(0, maxResults);
+};
+
 let analysisCache = new Map();
 
 const computeGuaranteedScore = (state, matrix) => {
@@ -804,6 +856,7 @@ function PairingEngine() {
   const [showArmyListPlayer, setShowArmyListPlayer] = useState(null);
   const [showStartPairingConfirm, setShowStartPairingConfirm] = useState(false);
   const [showPdfExportModal, setShowPdfExportModal] = useState(false);
+  const [showBestCombinations, setShowBestCombinations] = useState(false);
   
   // Current round being played
   const [currentRoundIndex, setCurrentRoundIndex] = useState(null);
@@ -1696,6 +1749,111 @@ function PairingEngine() {
           </div>
         )}
         
+        {/* Best combinations modal */}
+        {showBestCombinations && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg w-full max-w-4xl max-h-[90vh] flex flex-col">
+              <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+                <h3 className="text-lg font-bold">🎯 Meilleures combinaisons restantes</h3>
+                <button 
+                  onClick={() => setShowBestCombinations(false)} 
+                  className="px-4 py-2 bg-blue-600 rounded-lg font-semibold hover:bg-blue-500"
+                >
+                  ← Retour au pairing
+                </button>
+              </div>
+              
+              <div className="p-4 overflow-auto flex-1">
+                {(() => {
+                  const combinations = calculateBestRemainingCombinations(state, matrix, 25);
+                  const fixedCount = state.fixedDuels.length;
+                  
+                  if (combinations.length === 0) {
+                    return <p className="text-gray-400 text-center">Aucune combinaison disponible</p>;
+                  }
+                  
+                  return (
+                    <div className="space-y-2">
+                      <div className="text-sm text-gray-400 mb-4">
+                        {fixedCount > 0 && (
+                          <span className="bg-gray-700 px-2 py-1 rounded mr-2">
+                            {fixedCount} duel{fixedCount > 1 ? 's' : ''} fixé{fixedCount > 1 ? 's' : ''} = {calculateTeamScore(state.fixedDuels, matrix)} pts
+                          </span>
+                        )}
+                        <span>{combinations.length} combinaison{combinations.length > 1 ? 's' : ''} possible{combinations.length > 1 ? 's' : ''}</span>
+                      </div>
+                      
+                      {combinations.map((combo, idx) => {
+                        const isWin = combo.score > 65;
+                        const isDraw = combo.score >= 55 && combo.score <= 65;
+                        const resultColor = isWin ? 'text-green-400' : isDraw ? 'text-yellow-400' : 'text-red-400';
+                        const resultBg = isWin ? 'bg-green-900/30' : isDraw ? 'bg-yellow-900/30' : 'bg-red-900/30';
+                        
+                        return (
+                          <div key={idx} className={`${resultBg} rounded-lg p-3 border border-gray-700`}>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-3">
+                                <span className="text-gray-400 font-mono text-sm">#{idx + 1}</span>
+                                <span className={`text-xl font-bold ${resultColor}`}>{combo.score}/120</span>
+                                <span className={`text-sm ${resultColor}`}>
+                                  {isWin ? '🏆 Victoire' : isDraw ? '🤝 Égalité' : '❌ Défaite'}
+                                </span>
+                              </div>
+                              {fixedCount > 0 && combo.additionalScore !== undefined && (
+                                <span className="text-xs text-gray-500">
+                                  ({combo.fixedScore} fixés + {combo.additionalScore} restants)
+                                </span>
+                              )}
+                            </div>
+                            
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                              {combo.duels.map((duel, duelIdx) => {
+                                const ourPlayer = data.myTeam.players[duel.us];
+                                const theirPlayer = opponent.players[duel.them];
+                                const symbol = getMatrixValue(matrix, duel.us, duel.them);
+                                const duelScore = symbolToScore(symbol);
+                                const isFixed = duel.fixed;
+                                
+                                return (
+                                  <div 
+                                    key={duelIdx} 
+                                    className={`flex items-center gap-2 text-sm p-2 rounded ${isFixed ? 'bg-gray-700/50 border border-gray-600' : 'bg-gray-900/50'}`}
+                                  >
+                                    {isFixed && <span className="text-xs text-yellow-400">🔒</span>}
+                                    <span className="text-blue-400 truncate" title={ourPlayer?.pseudo}>
+                                      {ourPlayer?.factionShort || ourPlayer?.faction?.slice(0, 4) || '?'}
+                                    </span>
+                                    <span className={`px-1 rounded text-xs font-bold ${getSymbolColor(symbol)}`}>
+                                      {symbol}
+                                    </span>
+                                    <span className="text-red-400 truncate" title={theirPlayer?.pseudo}>
+                                      {theirPlayer?.factionShort || theirPlayer?.faction?.slice(0, 4) || '?'}
+                                    </span>
+                                    <span className="text-gray-500 text-xs ml-auto">{duelScore}pts</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+              
+              <div className="p-4 border-t border-gray-700">
+                <button 
+                  onClick={() => setShowBestCombinations(false)} 
+                  className="w-full py-3 bg-blue-600 rounded-lg font-semibold hover:bg-blue-500"
+                >
+                  ← Retour au pairing
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div>
@@ -1711,6 +1869,7 @@ function PairingEngine() {
               </div>
             )}
             <button onClick={handleUndo} disabled={history.length === 0} className="px-3 py-1 bg-gray-700 rounded text-sm disabled:opacity-50">↩ Annuler</button>
+            <button onClick={() => setShowBestCombinations(true)} disabled={isFinished} className="px-3 py-1 bg-blue-700 rounded text-sm disabled:opacity-50">🎯 Top 25</button>
             <button onClick={() => setShowResetConfirm(true)} className="px-3 py-1 bg-red-700 rounded text-sm">🔄 Reset</button>
           </div>
         </div>
