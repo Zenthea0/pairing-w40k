@@ -1773,70 +1773,76 @@ function PairingEngine() {
                   }
                   
                   return (
-                    <div className="space-y-2">
-                      <div className="text-sm text-gray-400 mb-4">
+                    <div>
+                      <div className="text-sm text-gray-400 mb-3">
                         {fixedCount > 0 && (
                           <span className="bg-gray-700 px-2 py-1 rounded mr-2">
                             {fixedCount} duel{fixedCount > 1 ? 's' : ''} fixé{fixedCount > 1 ? 's' : ''} = {calculateTeamScore(state.fixedDuels, matrix)} pts
                           </span>
                         )}
-                        <span>{combinations.length} combinaison{combinations.length > 1 ? 's' : ''} possible{combinations.length > 1 ? 's' : ''}</span>
+                        <span>{combinations.length} combinaison{combinations.length > 1 ? 's' : ''}</span>
                       </div>
                       
-                      {combinations.map((combo, idx) => {
-                        const isWin = combo.score > 65;
-                        const isDraw = combo.score >= 55 && combo.score <= 65;
-                        const resultColor = isWin ? 'text-green-400' : isDraw ? 'text-yellow-400' : 'text-red-400';
-                        const resultBg = isWin ? 'bg-green-900/30' : isDraw ? 'bg-yellow-900/30' : 'bg-red-900/30';
-                        
-                        return (
-                          <div key={idx} className={`${resultBg} rounded-lg p-3 border border-gray-700`}>
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-3">
-                                <span className="text-gray-400 font-mono text-sm">#{idx + 1}</span>
-                                <span className={`text-xl font-bold ${resultColor}`}>{combo.score}/120</span>
-                                <span className={`text-sm ${resultColor}`}>
-                                  {isWin ? '🏆 Victoire' : isDraw ? '🤝 Égalité' : '❌ Défaite'}
-                                </span>
-                              </div>
-                              {fixedCount > 0 && combo.additionalScore !== undefined && (
-                                <span className="text-xs text-gray-500">
-                                  ({combo.fixedScore} fixés + {combo.additionalScore} restants)
-                                </span>
-                              )}
-                            </div>
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-600">
+                            <th className="py-2 px-1 text-left text-gray-400 font-medium">#</th>
+                            <th className="py-2 px-1 text-center text-gray-400 font-medium">Score</th>
+                            <th className="py-2 px-1 text-center text-gray-400 font-medium">Résultat</th>
+                            {[0, 1, 2, 3, 4, 5].map(i => (
+                              <th key={i} className="py-2 px-1 text-center text-gray-400 font-medium">
+                                <span className="text-blue-400">{data.myTeam.players[i]?.factionShort || data.myTeam.players[i]?.faction?.slice(0, 3) || `J${i+1}`}</span>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {combinations.map((combo, idx) => {
+                            const isWin = combo.score > 65;
+                            const isDraw = combo.score >= 55 && combo.score <= 65;
+                            const resultColor = isWin ? 'text-green-400' : isDraw ? 'text-yellow-400' : 'text-red-400';
+                            const rowBg = idx % 2 === 0 ? 'bg-gray-900/30' : 'bg-gray-800/30';
                             
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                              {combo.duels.map((duel, duelIdx) => {
-                                const ourPlayer = data.myTeam.players[duel.us];
-                                const theirPlayer = opponent.players[duel.them];
-                                const symbol = getMatrixValue(matrix, duel.us, duel.them);
-                                const duelScore = symbolToScore(symbol);
-                                const isFixed = duel.fixed;
-                                
-                                return (
-                                  <div 
-                                    key={duelIdx} 
-                                    className={`flex items-center gap-2 text-sm p-2 rounded ${isFixed ? 'bg-gray-700/50 border border-gray-600' : 'bg-gray-900/50'}`}
-                                  >
-                                    {isFixed && <span className="text-xs text-yellow-400">🔒</span>}
-                                    <span className="text-blue-400 truncate" title={ourPlayer?.pseudo}>
-                                      {ourPlayer?.factionShort || ourPlayer?.faction?.slice(0, 4) || '?'}
-                                    </span>
-                                    <span className={`px-1 rounded text-xs font-bold ${getSymbolColor(symbol)}`}>
-                                      {symbol}
-                                    </span>
-                                    <span className="text-red-400 truncate" title={theirPlayer?.pseudo}>
-                                      {theirPlayer?.factionShort || theirPlayer?.faction?.slice(0, 4) || '?'}
-                                    </span>
-                                    <span className="text-gray-500 text-xs ml-auto">{duelScore}pts</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })}
+                            // Créer un mapping ourIdx -> duel pour afficher dans l'ordre de nos joueurs
+                            const duelsByOurPlayer = {};
+                            combo.duels.forEach(duel => {
+                              duelsByOurPlayer[duel.us] = duel;
+                            });
+                            
+                            return (
+                              <tr key={idx} className={`${rowBg} border-b border-gray-700/50`}>
+                                <td className="py-2 px-1 text-gray-500 font-mono">{idx + 1}</td>
+                                <td className={`py-2 px-1 text-center font-bold ${resultColor}`}>{combo.score}</td>
+                                <td className={`py-2 px-1 text-center ${resultColor}`}>
+                                  {isWin ? '🏆' : isDraw ? '🤝' : '❌'}
+                                </td>
+                                {[0, 1, 2, 3, 4, 5].map(ourIdx => {
+                                  const duel = duelsByOurPlayer[ourIdx];
+                                  if (!duel) return <td key={ourIdx} className="py-2 px-1 text-center text-gray-600">-</td>;
+                                  
+                                  const theirPlayer = opponent.players[duel.them];
+                                  const symbol = getMatrixValue(matrix, duel.us, duel.them);
+                                  const isFixed = duel.fixed;
+                                  
+                                  return (
+                                    <td key={ourIdx} className="py-2 px-1 text-center">
+                                      <div className={`inline-flex items-center gap-1 px-1 py-0.5 rounded ${isFixed ? 'bg-gray-600/50' : ''}`}>
+                                        {isFixed && <span className="text-yellow-400 text-xs">🔒</span>}
+                                        <span className={`px-1 rounded text-xs font-bold ${getSymbolColor(symbol)}`}>
+                                          {symbol}
+                                        </span>
+                                        <span className="text-red-400 text-xs">
+                                          {theirPlayer?.factionShort || theirPlayer?.faction?.slice(0, 3) || '?'}
+                                        </span>
+                                      </div>
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   );
                 })()}
