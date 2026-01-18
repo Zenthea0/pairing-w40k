@@ -856,6 +856,7 @@ function PairingEngine() {
   const [showArmyListPlayer, setShowArmyListPlayer] = useState(null);
   const [showStartPairingConfirm, setShowStartPairingConfirm] = useState(false);
   const [showBestCombinations, setShowBestCombinations] = useState(false);
+  const [showResetTournamentConfirm, setShowResetTournamentConfirm] = useState(false);
   
   // Current round being played
   const [currentRoundIndex, setCurrentRoundIndex] = useState(null);
@@ -1416,6 +1417,79 @@ function PairingEngine() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+        
+        {/* Bouton Reset Tournoi */}
+        <div className="mt-6 pt-6 border-t border-gray-700">
+          <h3 className="text-lg font-semibold mb-3 text-red-400">⚠️ Zone de danger</h3>
+          <button
+            onClick={() => setShowResetTournamentConfirm(true)}
+            className="px-4 py-2 bg-red-700 rounded hover:bg-red-600"
+          >
+            🗑️ Réinitialiser le tournoi
+          </button>
+          <p className="text-xs text-gray-500 mt-2">
+            Remet à zéro toutes les rondes, pairings et scores. Les équipes et matrices sont conservées.
+          </p>
+        </div>
+        
+        {/* Modal confirmation reset tournoi */}
+        {showResetTournamentConfirm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+            <div className="bg-gray-800 rounded-lg p-6 max-w-md mx-4">
+              <h3 className="text-lg font-bold mb-2 text-red-400">⚠️ Réinitialiser le tournoi ?</h3>
+              <p className="text-gray-300 mb-4">
+                Cette action va supprimer :
+              </p>
+              <ul className="text-gray-400 text-sm mb-4 list-disc list-inside space-y-1">
+                <li>Tous les résultats de pairing</li>
+                <li>Tous les scores saisis</li>
+                <li>Les associations rondes/adversaires</li>
+                <li>Les scénarios et déploiements</li>
+              </ul>
+              <p className="text-gray-300 mb-4">
+                <span className="text-green-400">✓</span> Les équipes, joueurs, factions, matrices et listes d'armée seront conservés.
+              </p>
+              <div className="flex gap-3 justify-end">
+                <button 
+                  onClick={() => setShowResetTournamentConfirm(false)} 
+                  className="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600"
+                >
+                  Annuler
+                </button>
+                <button 
+                  onClick={() => {
+                    // Reset des rondes
+                    const resetRounds = data.rounds.map((round, i) => ({
+                      id: i,
+                      name: `Ronde ${i + 1}`,
+                      opponentIndex: null,
+                      scenario: '',
+                      deployment: '',
+                      pairingResult: null,
+                      duelScores: null,
+                    }));
+                    
+                    setData({
+                      ...data,
+                      rounds: resetRounds,
+                      selectedRoundIndex: null,
+                    });
+                    
+                    // Reset du pairing en cours
+                    setPairingState(null);
+                    setHistory([]);
+                    setCurrentRoundIndex(null);
+                    
+                    setShowResetTournamentConfirm(false);
+                  }} 
+                  className="px-4 py-2 bg-red-600 rounded hover:bg-red-500"
+                >
+                  Confirmer la réinitialisation
+                </button>
+              </div>
             </div>
           </div>
         )}
