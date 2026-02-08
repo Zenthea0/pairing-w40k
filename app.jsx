@@ -1658,7 +1658,12 @@ function PairingEngine() {
                 <tr>
                   <th className="p-2 text-left">Nous / Eux →</th>
                   {opponent.players.map((p, i) => (
-                    <th key={i} className="p-2 text-center text-xs">
+                    <th 
+                      key={i} 
+                      className="p-2 text-center text-xs cursor-pointer hover:text-blue-400"
+                      title={`Cliquer pour voir la liste de ${p.faction || `Adversaire ${i + 1}`}`}
+                      onClick={() => setShowArmyListPlayer(p)}
+                    >
                       {p.factionShort || p.faction || `Adv ${i + 1}`}
                     </th>
                   ))}
@@ -1691,6 +1696,11 @@ function PairingEngine() {
             </table>
           </div>
         </div>
+        
+        {/* Modal liste d'armée */}
+        {showArmyListPlayer && (
+          <ArmyListModal player={showArmyListPlayer} onClose={() => setShowArmyListPlayer(null)} />
+        )}
       </div>
     );
   };
