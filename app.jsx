@@ -717,20 +717,41 @@ const analyzeCurrentPhase = (state, matrix) => {
     })
   );
   
-  const ourWorstCases = scenarioMatrix.map(row => Math.min(...row));
+  // Calculer garanti, moyenne et écart-type pour nos choix
   const ourRanking = ourMoves
-    .map((move, index) => ({ move, guaranteed: ourWorstCases[index] }))
-    .sort((a, b) => b.guaranteed - a.guaranteed);
+    .map((move, index) => {
+      const scores = scenarioMatrix[index];
+      const guaranteed = Math.min(...scores);
+      const mean = scores.reduce((sum, s) => sum + s, 0) / scores.length;
+      const variance = scores.reduce((sum, s) => sum + Math.pow(s - mean, 2), 0) / scores.length;
+      const stdDev = Math.sqrt(variance);
+      return { move, guaranteed, mean, stdDev };
+    })
+    .sort((a, b) => {
+      // Tri par garanti décroissant, puis moyenne décroissante, puis écart-type croissant
+      if (b.guaranteed !== a.guaranteed) return b.guaranteed - a.guaranteed;
+      if (b.mean !== a.mean) return b.mean - a.mean;
+      return a.stdDev - b.stdDev;
+    });
   
-  const theirWorstCasesForUs = theirMoves.map((_, colIndex) =>
-    Math.min(...scenarioMatrix.map(row => row[colIndex]))
-  );
-  
+  // Calculer garanti, moyenne et écart-type pour les choix adverses
   const theirRanking = theirMoves
-    .map((move, index) => ({ move, guaranteed: 120 - theirWorstCasesForUs[index] }))
-    .sort((a, b) => b.guaranteed - a.guaranteed);
+    .map((move, colIndex) => {
+      const scores = scenarioMatrix.map(row => row[colIndex]);
+      const guaranteedForUs = Math.min(...scores);
+      const guaranteed = 120 - guaranteedForUs; // Score garanti pour l'adversaire
+      const mean = 120 - (scores.reduce((sum, s) => sum + s, 0) / scores.length);
+      const variance = scores.reduce((sum, s) => sum + Math.pow(s - (120 - mean), 2), 0) / scores.length;
+      const stdDev = Math.sqrt(variance);
+      return { move, guaranteed, mean, stdDev };
+    })
+    .sort((a, b) => {
+      if (b.guaranteed !== a.guaranteed) return b.guaranteed - a.guaranteed;
+      if (b.mean !== a.mean) return b.mean - a.mean;
+      return a.stdDev - b.stdDev;
+    });
   
-  return { ourRanking, theirRanking, bestGuaranteed: Math.max(...ourWorstCases) };
+  return { ourRanking, theirRanking, bestGuaranteed: Math.max(...ourRanking.map(r => r.guaranteed)) };
 };
 
 const computeGuaranteedScoreForMove = (state, matrix, ourMove) => {
@@ -2171,28 +2192,46 @@ function PairingEngine() {
                   )}
                   
                   <div className="mb-3">
-                    <div className="text-xs text-gray-400 mb-2">📊 Nos meilleurs choix</div>
-                    {analysis.ourRanking.slice(0, 3).map((item, idx) => {
+                    <div className="flex justify-between text-xs text-gray-400 mb-1 px-1">
+                      <span>📊 Nos meilleurs choix</span>
+                      <span className="text-right">Gar. / Moy / σ</span>
+                    </div>
+                    {analysis.ourRanking.map((item, idx) => {
                       // En phase d'assignation (3/6), nos choix sont des joueurs ADVERSES
                       const getPlayerForOurMove = isAssignPhase ? getTheirPlayer : getOurPlayer;
                       return (
-                        <div key={idx} className={`flex justify-between text-sm p-2 rounded mb-1 ${idx === 0 ? 'bg-green-900/50 border border-green-600' : 'bg-gray-700'}`}>
-                          <span>#{idx + 1} {item.move.map(i => getPlayerForOurMove(i)?.factionShort || `J${i+1}`).join(' + ')}</span>
-                          <span className="text-xs bg-gray-600 px-2 rounded">≥{item.guaranteed.toFixed(1)}</span>
+                        <div key={idx} className={`flex justify-between items-center text-sm p-2 rounded mb-1 ${idx === 0 ? 'bg-green-900/50 border border-green-600' : 'bg-gray-700'}`}>
+                          <span className="truncate flex-1">#{idx + 1} {item.move.map(i => getPlayerForOurMove(i)?.factionShort || `J${i+1}`).join(' + ')}</span>
+                          <span className="text-xs font-mono text-right ml-2 whitespace-nowrap">
+                            <span className="text-green-400">{item.guaranteed.toFixed(0)}</span>
+                            <span className="text-gray-500"> / </span>
+                            <span className="text-blue-400">{item.mean.toFixed(1)}</span>
+                            <span className="text-gray-500"> / </span>
+                            <span className="text-yellow-400">{item.stdDev.toFixed(1)}</span>
+                          </span>
                         </div>
                       );
                     })}
                   </div>
                   
                   <div>
-                    <div className="text-xs text-gray-400 mb-2">🎯 Prédiction adverse</div>
-                    {analysis.theirRanking.slice(0, 2).map((item, idx) => {
+                    <div className="flex justify-between text-xs text-gray-400 mb-1 px-1">
+                      <span>🎯 Prédiction adverse</span>
+                      <span className="text-right">Gar. / Moy / σ</span>
+                    </div>
+                    {analysis.theirRanking.map((item, idx) => {
                       // En phase d'assignation (3/6), leurs choix sont des joueurs de NOTRE équipe
                       const getPlayerForTheirMove = isAssignPhase ? getOurPlayer : getTheirPlayer;
                       return (
-                        <div key={idx} className={`flex justify-between text-sm p-2 rounded mb-1 ${idx === 0 ? 'bg-red-900/50 border border-red-600' : 'bg-gray-700'}`}>
-                          <span>#{idx + 1} {item.move.map(i => getPlayerForTheirMove(i)?.factionShort || `J${i+1}`).join(' + ')}</span>
-                          <span className="text-xs bg-gray-600 px-2 rounded">≥{item.guaranteed.toFixed(1)}</span>
+                        <div key={idx} className={`flex justify-between items-center text-sm p-2 rounded mb-1 ${idx === 0 ? 'bg-red-900/50 border border-red-600' : 'bg-gray-700'}`}>
+                          <span className="truncate flex-1">#{idx + 1} {item.move.map(i => getPlayerForTheirMove(i)?.factionShort || `J${i+1}`).join(' + ')}</span>
+                          <span className="text-xs font-mono text-right ml-2 whitespace-nowrap">
+                            <span className="text-green-400">{item.guaranteed.toFixed(0)}</span>
+                            <span className="text-gray-500"> / </span>
+                            <span className="text-blue-400">{item.mean.toFixed(1)}</span>
+                            <span className="text-gray-500"> / </span>
+                            <span className="text-yellow-400">{item.stdDev.toFixed(1)}</span>
+                          </span>
                         </div>
                       );
                     })}
