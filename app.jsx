@@ -791,6 +791,19 @@ const generateDecisionTree = (state, matrix, preselectedUs = null, myTeamPlayers
     }
   }
   
+  // Déterminer si c'est une phase d'assignation (où les indices sont inversés)
+  const isAssignPhase = (phase) => phase === 3 || phase === 6;
+  
+  // Pour les phases d'assignation:
+  // - "us" moves sont des indices de joueurs ADVERSES (on choisit quel attaquant adverse)
+  // - "them" moves sont des indices de NOS joueurs (ils choisissent quel de nos attaquants)
+  const getPlayerTeamForMove = (side, phase) => {
+    if (isAssignPhase(phase)) {
+      return side === 'us' ? 'them' : 'us';
+    }
+    return side;
+  };
+  
   // Calculer les scores pour chaque réponse adverse (pour les probabilités)
   const calculateTheirProbabilities = (theirMovesLocal, stateLocal) => {
     if (theirMovesLocal.length === 0) return [];
@@ -855,6 +868,7 @@ const generateDecisionTree = (state, matrix, preselectedUs = null, myTeamPlayers
       type: 'us',
       move: ourMove1,
       level: 1,
+      playerTeam: getPlayerTeamForMove('us', state.phase), // Équipe réelle des joueurs
       children: []
     };
     
@@ -872,6 +886,7 @@ const generateDecisionTree = (state, matrix, preselectedUs = null, myTeamPlayers
         move: theirMove1,
         probability: theirData.probability,
         level: 2,
+        playerTeam: getPlayerTeamForMove('them', state.phase), // Équipe réelle des joueurs
         children: []
       };
       
@@ -892,6 +907,7 @@ const generateDecisionTree = (state, matrix, preselectedUs = null, myTeamPlayers
           type: 'us',
           move: ourMove2,
           level: 3,
+          playerTeam: getPlayerTeamForMove('us', state2.phase), // Équipe réelle des joueurs
           children: []
         };
         
@@ -910,6 +926,7 @@ const generateDecisionTree = (state, matrix, preselectedUs = null, myTeamPlayers
               move: theirMove2,
               probability: theirData2.probability,
               level: 4,
+              playerTeam: getPlayerTeamForMove('them', state2.phase), // Équipe réelle des joueurs
               finalScore: computeGuaranteedScore(state3, matrix),
               forgottenRefused: extractForgottenRefused(state3)
             };
@@ -2221,9 +2238,12 @@ function PairingEngine() {
                     const colorClass = isUs ? 'text-blue-400' : 'text-red-400';
                     const icon = isUs ? '🔵' : '🔴';
                     
-                    // Formater le coup
+                    // Utiliser playerTeam pour déterminer de quelle équipe sont les joueurs
+                    const playerTeam = node.playerTeam || (isUs ? 'us' : 'them');
+                    
+                    // Formater le coup avec la bonne équipe
                     const moveText = node.move.map(i => {
-                      const player = isUs ? getOurPlayer(i) : getTheirPlayer(i);
+                      const player = playerTeam === 'us' ? getOurPlayer(i) : getTheirPlayer(i);
                       return player?.factionShort || player?.faction?.slice(0, 4) || `J${i+1}`;
                     }).join(' + ');
                     
