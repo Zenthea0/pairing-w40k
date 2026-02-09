@@ -767,6 +767,160 @@ const computeGuaranteedScoreForMove = (state, matrix, ourMove) => {
   return worstCase;
 };
 
+// Génère l'arbre de décision à 3 niveaux
+const generateDecisionTree = (state, matrix, preselectedUs = null) => {
+  if (state.phase === 'finished') {
+    return { nodes: [], finalScore: calculateTeamScore(state.fixedDuels, matrix) };
+  }
+  
+  // Obtenir les coups possibles
+  let ourMoves = generateLegalMoves(state, 'us');
+  const theirMoves = generateLegalMoves(state, 'them');
+  
+  if (ourMoves.length === 0 || theirMoves.length === 0) {
+    return { nodes: [], finalScore: calculateTeamScore(state.fixedDuels, matrix) };
+  }
+  
+  // Si présélection, filtrer nos coups
+  if (preselectedUs !== null && preselectedUs.length > 0) {
+    // Vérifier si la présélection correspond à un coup valide
+    const preselectedKey = JSON.stringify([...preselectedUs].sort());
+    const matchingMove = ourMoves.find(m => JSON.stringify([...m].sort()) === preselectedKey);
+    if (matchingMove) {
+      ourMoves = [matchingMove];
+    }
+  }
+  
+  // Calculer les scores pour chaque réponse adverse (pour les probabilités)
+  const calculateTheirProbabilities = (theirMovesLocal, stateLocal) => {
+    if (theirMovesLocal.length === 0) return [];
+    
+    const theirScores = theirMovesLocal.map(theirMove => {
+      // Score garanti pour l'adversaire s'il fait ce coup
+      const ourMovesForThis = generateLegalMoves(stateLocal, 'us');
+      if (ourMovesForThis.length === 0) return { move: theirMove, score: 60 };
+      
+      let bestForThem = -Infinity;
+      for (const ourMove of ourMovesForThis) {
+        const newState = applyMove(stateLocal, ourMove, theirMove);
+        const scoreForUs = computeGuaranteedScore(newState, matrix);
+        const scoreForThem = 120 - scoreForUs;
+        bestForThem = Math.max(bestForThem, scoreForThem);
+      }
+      return { move: theirMove, score: bestForThem };
+    });
+    
+    // Convertir en probabilités (softmax simplifié basé sur les scores)
+    const maxScore = Math.max(...theirScores.map(s => s.score));
+    const weights = theirScores.map(s => Math.exp((s.score - maxScore) / 5)); // Temperature = 5
+    const totalWeight = weights.reduce((a, b) => a + b, 0);
+    
+    return theirScores.map((s, i) => ({
+      move: s.move,
+      score: s.score,
+      probability: Math.round((weights[i] / totalWeight) * 100)
+    }));
+  };
+  
+  // Construire l'arbre
+  const tree = [];
+  
+  for (const ourMove1 of ourMoves) {
+    const node1 = {
+      type: 'us',
+      move: ourMove1,
+      level: 1,
+      children: []
+    };
+    
+    // Niveau 2: Réponses adverses
+    const theirProbs = calculateTheirProbabilities(theirMoves, state);
+    
+    for (const theirData of theirProbs) {
+      const theirMove1 = theirData.move;
+      const state2 = applyMove(state, ourMove1, theirMove1);
+      
+      const node2 = {
+        type: 'them',
+        move: theirMove1,
+        probability: theirData.probability,
+        level: 2,
+        children: []
+      };
+      
+      // Si le pairing est terminé après ce coup
+      if (state2.phase === 'finished') {
+        node2.finalScore = calculateTeamScore(state2.fixedDuels, matrix);
+        node1.children.push(node2);
+        continue;
+      }
+      
+      // Niveau 3: Nos réponses
+      const ourMoves2 = generateLegalMoves(state2, 'us');
+      const theirMoves2 = generateLegalMoves(state2, 'them');
+      
+      for (const ourMove2 of ourMoves2) {
+        const node3 = {
+          type: 'us',
+          move: ourMove2,
+          level: 3,
+          children: []
+        };
+        
+        // Niveau 4: Réponses adverses finales (on calcule juste le score garanti)
+        if (theirMoves2.length > 0) {
+          const theirProbs2 = calculateTheirProbabilities(theirMoves2, state2);
+          
+          for (const theirData2 of theirProbs2) {
+            const theirMove2 = theirData2.move;
+            const state3 = applyMove(state2, ourMove2, theirMove2);
+            
+            const node4 = {
+              type: 'them',
+              move: theirMove2,
+              probability: theirData2.probability,
+              level: 4,
+              finalScore: computeGuaranteedScore(state3, matrix)
+            };
+            
+            node3.children.push(node4);
+          }
+        } else {
+          // Pas de coup adverse possible, calculer le score final
+          const state3 = applyMove(state2, ourMove2, []);
+          node3.finalScore = computeGuaranteedScore(state3, matrix);
+        }
+        
+        node2.children.push(node3);
+      }
+      
+      node1.children.push(node2);
+    }
+    
+    tree.push(node1);
+  }
+  
+  return { nodes: tree, phase: state.phase };
+};
+
+// Trouve le meilleur score dans un sous-arbre
+const findBestScoreInTree = (node) => {
+  if (node.finalScore !== undefined) return node.finalScore;
+  if (!node.children || node.children.length === 0) return 0;
+  
+  const childScores = node.children.map(child => findBestScoreInTree(child));
+  return Math.max(...childScores);
+};
+
+// Trouve le pire score dans un sous-arbre
+const findWorstScoreInTree = (node) => {
+  if (node.finalScore !== undefined) return node.finalScore;
+  if (!node.children || node.children.length === 0) return 120;
+  
+  const childScores = node.children.map(child => findWorstScoreInTree(child));
+  return Math.min(...childScores);
+};
+
 // ============================================
 // COMPOSANTS UI RÉUTILISABLES
 // ============================================
@@ -878,6 +1032,8 @@ function PairingEngine() {
   const [showStartPairingConfirm, setShowStartPairingConfirm] = useState(false);
   const [showBestCombinations, setShowBestCombinations] = useState(false);
   const [showResetTournamentConfirm, setShowResetTournamentConfirm] = useState(false);
+  const [showDecisionTree, setShowDecisionTree] = useState(false);
+  const [showTreeProbabilities, setShowTreeProbabilities] = useState(false);
   
   // Current round being played
   const [currentRoundIndex, setCurrentRoundIndex] = useState(null);
@@ -1964,6 +2120,153 @@ function PairingEngine() {
           </div>
         )}
         
+        {/* Decision Tree Modal */}
+        {showDecisionTree && (
+          <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg w-full max-w-5xl max-h-[90vh] flex flex-col">
+              <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+                <h3 className="text-lg font-bold">🌳 Arbre de décision - Phase {state.phase} : {PHASES[state.phase]?.name}</h3>
+                <button 
+                  onClick={() => setShowDecisionTree(false)} 
+                  className="px-4 py-2 bg-purple-600 rounded-lg font-semibold hover:bg-purple-500"
+                >
+                  ✕ Fermer
+                </button>
+              </div>
+              
+              <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showTreeProbabilities}
+                      onChange={(e) => setShowTreeProbabilities(e.target.checked)}
+                      className="rounded"
+                    />
+                    <span className="text-sm">Afficher les probabilités</span>
+                  </label>
+                </div>
+                {selectedUs.length > 0 && (
+                  <div className="text-sm text-yellow-400">
+                    📌 Présélection active : {selectedUs.map(i => getOurPlayer(i)?.factionShort || `J${i+1}`).join(' + ')}
+                  </div>
+                )}
+              </div>
+              
+              <div className="p-4 overflow-auto flex-1 font-mono text-sm">
+                {(() => {
+                  const tree = generateDecisionTree(state, matrix, selectedUs.length > 0 ? selectedUs : null);
+                  
+                  if (tree.nodes.length === 0) {
+                    return <p className="text-gray-400 text-center">Aucune donnée disponible</p>;
+                  }
+                  
+                  // Trouver le meilleur score global pour marquer ✅
+                  const allFinalScores = [];
+                  const collectScores = (node) => {
+                    if (node.finalScore !== undefined) allFinalScores.push(node.finalScore);
+                    if (node.children) node.children.forEach(collectScores);
+                  };
+                  tree.nodes.forEach(collectScores);
+                  const bestScore = Math.max(...allFinalScores);
+                  const worstScore = Math.min(...allFinalScores);
+                  
+                  // Fonction récursive pour rendre l'arbre
+                  const renderNode = (node, depth = 0, prefix = '', isLast = true) => {
+                    const indent = prefix + (depth > 0 ? (isLast ? '└── ' : '├── ') : '');
+                    const childPrefix = prefix + (depth > 0 ? (isLast ? '    ' : '│   ') : '');
+                    
+                    const isUs = node.type === 'us';
+                    const colorClass = isUs ? 'text-blue-400' : 'text-red-400';
+                    const icon = isUs ? '🔵' : '🔴';
+                    
+                    // Formater le coup
+                    const moveText = node.move.map(i => {
+                      const player = isUs ? getOurPlayer(i) : getTheirPlayer(i);
+                      return player?.factionShort || player?.faction?.slice(0, 4) || `J${i+1}`;
+                    }).join(' + ');
+                    
+                    // Probabilité (pour les coups adverses)
+                    const probText = !isUs && showTreeProbabilities && node.probability !== undefined 
+                      ? ` (${node.probability}%)` 
+                      : '';
+                    
+                    // Score final
+                    let scoreText = '';
+                    let scoreClass = '';
+                    if (node.finalScore !== undefined) {
+                      scoreText = ` → ${node.finalScore}`;
+                      if (node.finalScore === bestScore) {
+                        scoreText += ' ✅';
+                        scoreClass = 'text-green-400';
+                      } else if (node.finalScore < 55) {
+                        scoreText += ' ⚠️';
+                        scoreClass = 'text-red-400';
+                      }
+                    }
+                    
+                    // Description du niveau
+                    const levelDesc = {
+                      1: state.phase === 1 ? 'Notre Def1' : state.phase === 2 ? 'Nos Att1' : state.phase === 3 ? 'Notre Assign' : state.phase === 4 ? 'Notre Def2' : state.phase === 5 ? 'Nos Att2' : 'Notre Assign',
+                      2: state.phase === 1 ? 'Leur Def1' : state.phase === 2 ? 'Leurs Att1' : state.phase === 3 ? 'Leur Assign' : state.phase === 4 ? 'Leur Def2' : state.phase === 5 ? 'Leurs Att2' : 'Leur Assign',
+                      3: state.phase === 1 ? 'Nos Att1' : state.phase === 2 ? 'Notre Def2' : state.phase === 3 ? 'Notre Def2' : state.phase === 4 ? 'Nos Att2' : '',
+                      4: state.phase === 1 ? 'Leurs Att1' : state.phase === 2 ? 'Leur Def2' : state.phase === 3 ? 'Leur Def2' : state.phase === 4 ? 'Leurs Att2' : '',
+                    };
+                    
+                    const levelLabel = depth === 0 && node.level ? (
+                      <span className="text-gray-500 text-xs mr-2">[{levelDesc[node.level] || ''}]</span>
+                    ) : null;
+                    
+                    return (
+                      <div key={`${depth}-${JSON.stringify(node.move)}`}>
+                        <div className="whitespace-pre">
+                          <span className="text-gray-600">{indent}</span>
+                          {levelLabel}
+                          <span>{icon}</span>
+                          <span className={colorClass}> {moveText}</span>
+                          <span className="text-gray-500">{probText}</span>
+                          <span className={scoreClass}>{scoreText}</span>
+                        </div>
+                        {node.children && node.children.map((child, idx) => 
+                          renderNode(child, depth + 1, childPrefix, idx === node.children.length - 1)
+                        )}
+                      </div>
+                    );
+                  };
+                  
+                  return (
+                    <div className="space-y-4">
+                      {tree.nodes.map((node, idx) => (
+                        <div key={idx} className="border-b border-gray-700 pb-4 last:border-0">
+                          {renderNode(node, 0, '', true)}
+                        </div>
+                      ))}
+                      
+                      <div className="mt-4 pt-4 border-t border-gray-600 text-xs text-gray-400">
+                        <div className="flex gap-6">
+                          <span>🔵 Notre choix</span>
+                          <span>🔴 Réponse adverse</span>
+                          <span className="text-green-400">✅ Meilleur score ({bestScore})</span>
+                          <span className="text-red-400">⚠️ Risque défaite (&lt;55)</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+              
+              <div className="p-4 border-t border-gray-700">
+                <button 
+                  onClick={() => setShowDecisionTree(false)} 
+                  className="w-full py-3 bg-purple-600 rounded-lg font-semibold hover:bg-purple-500"
+                >
+                  ← Retour au pairing
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div>
@@ -2376,6 +2679,16 @@ function PairingEngine() {
                   </div>
                 );
               })()}
+              
+              {/* Bouton Arbre de décision */}
+              {!isFinished && (
+                <button
+                  onClick={() => setShowDecisionTree(true)}
+                  className="w-full mt-3 py-2 bg-purple-600 rounded-lg text-sm font-semibold hover:bg-purple-500"
+                >
+                  🌳 Arbre de décision
+                </button>
+              )}
             </div>
           </div>
         </div>
