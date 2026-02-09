@@ -2530,7 +2530,7 @@ function PairingEngine() {
                 
                 {/* Bouton export image */}
                 <button
-                  onClick={() => exportPairingImage(state.roundIndex)}
+                  onClick={() => exportPairingImage(state.roundIndex, state)}
                   className="w-full mt-2 py-2 bg-purple-600 rounded-lg font-semibold hover:bg-purple-500"
                 >
                   📷 Exporter en image
@@ -2562,7 +2562,7 @@ function PairingEngine() {
                 
                 {/* Bouton export image */}
                 <button
-                  onClick={() => exportPairingImage(state.roundIndex)}
+                  onClick={() => exportPairingImage(state.roundIndex, state)}
                   className="w-full mt-2 py-2 bg-purple-600 rounded-lg font-semibold hover:bg-purple-500"
                 >
                   📷 Exporter en image
@@ -3156,21 +3156,47 @@ function PairingEngine() {
   // ============================================
   // EXPORT IMAGE FUNCTION
   // ============================================
-  const exportPairingImage = (roundIndex) => {
+  const exportPairingImage = (roundIndex, pairingStateParam = null) => {
+    console.log('exportPairingImage called with roundIndex:', roundIndex);
+    console.log('pairingStateParam:', pairingStateParam);
+    console.log('pairingState (from hook):', pairingState);
+    
     const round = roundIndex !== null && roundIndex !== undefined ? data.rounds?.[roundIndex] : null;
-    const pairingResult = round?.pairingResult || pairingState;
+    // Utiliser pairingStateParam s'il est fourni, sinon pairingState du hook
+    const currentPairingState = pairingStateParam || pairingState;
+    const pairingResult = round?.pairingResult || currentPairingState;
     
-    if (!pairingResult) return;
+    console.log('round:', round);
+    console.log('pairingResult:', pairingResult);
     
-    const opponentIndex = pairingResult.opponentIndex ?? pairingState?.opponentIndex ?? data.selectedOpponentIndex;
+    if (!pairingResult) {
+      console.log('No pairingResult, returning');
+      alert('Erreur: Aucun résultat de pairing trouvé');
+      return;
+    }
+    
+    const opponentIndex = pairingResult.opponentIndex ?? currentPairingState?.opponentIndex ?? data.selectedOpponentIndex;
     const opponent = data.opponents[opponentIndex];
     const matrix = opponent?.matrix;
     
-    if (!opponent || !matrix) return;
+    console.log('opponentIndex:', opponentIndex);
+    console.log('opponent:', opponent);
+    
+    if (!opponent || !matrix) {
+      console.log('No opponent or matrix, returning');
+      alert('Erreur: Adversaire ou matrice non trouvé');
+      return;
+    }
     
     // Pour un pairing libre, fixedDuels est directement sur pairingState
     const fixedDuels = pairingResult.fixedDuels || [];
-    if (fixedDuels.length === 0) return;
+    console.log('fixedDuels:', fixedDuels);
+    
+    if (fixedDuels.length === 0) {
+      console.log('No fixedDuels, returning');
+      alert('Erreur: Aucun duel fixé');
+      return;
+    }
     
     // Calculer le score si pas déjà présent
     const pairingScore = pairingResult.score ?? calculateTeamScore(fixedDuels, matrix);
