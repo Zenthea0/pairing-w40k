@@ -2538,6 +2538,38 @@ function PairingEngine() {
               </div>
             )}
             
+            {/* Bouton export image si pairing terminé mais pas d'initialStats */}
+            {isFinished && !state.initialStats && (
+              <div className="bg-gray-800 rounded-lg p-3 mb-3">
+                <div className="text-center mb-3">
+                  <h2 className="text-xl font-bold mb-1">Pairing terminé !</h2>
+                  <div className="text-2xl font-bold">{currentScore} / 120</div>
+                  <div className={`text-xl ${getResultColor(currentScore)}`}>{getResultLabel(currentScore)}</div>
+                </div>
+                
+                {/* Bouton saisie scores si associé à une ronde */}
+                {state.roundIndex !== null && state.roundIndex !== undefined && (
+                  <button
+                    onClick={() => {
+                      setCurrentRoundIndex(state.roundIndex);
+                      setCurrentPage('scores');
+                    }}
+                    className="w-full py-2 bg-blue-600 rounded-lg font-semibold hover:bg-blue-500"
+                  >
+                    📝 Saisir les scores des matchs
+                  </button>
+                )}
+                
+                {/* Bouton export image */}
+                <button
+                  onClick={() => exportPairingImage(state.roundIndex)}
+                  className="w-full mt-2 py-2 bg-purple-600 rounded-lg font-semibold hover:bg-purple-500"
+                >
+                  📷 Exporter en image
+                </button>
+              </div>
+            )}
+            
             {/* Defenders display */}
             {showDefenders && state.us.defender !== null && state.them.defender !== null && (
               <div className="grid grid-cols-2 gap-3 mb-3">
