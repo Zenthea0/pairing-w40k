@@ -768,7 +768,7 @@ const computeGuaranteedScoreForMove = (state, matrix, ourMove) => {
 };
 
 // Génère l'arbre de décision à 3 niveaux
-const generateDecisionTree = (state, matrix, preselectedUs = null) => {
+const generateDecisionTree = (state, matrix, preselectedUs = null, myTeamPlayers = [], opponentPlayers = []) => {
   if (state.phase === 'finished') {
     return { nodes: [], finalScore: calculateTeamScore(state.fixedDuels, matrix) };
   }
@@ -822,8 +822,33 @@ const generateDecisionTree = (state, matrix, preselectedUs = null) => {
     }));
   };
   
+  // Extraire les oubliés/refusés d'un état final
+  const extractForgottenRefused = (finalState) => {
+    if (finalState.phase !== 'finished' || !finalState.pairingDetails) return null;
+    
+    const details = finalState.pairingDetails;
+    const forgotten = details.forgotten;
+    const refused = details.refused;
+    
+    if (!forgotten && !refused) return null;
+    
+    return {
+      forgotten: forgotten ? {
+        us: forgotten.us,
+        them: forgotten.them,
+        symbol: getMatrixValue(matrix, forgotten.us, forgotten.them)
+      } : null,
+      refused: refused ? {
+        us: refused.us,
+        them: refused.them,
+        symbol: getMatrixValue(matrix, refused.us, refused.them)
+      } : null
+    };
+  };
+  
   // Construire l'arbre
   const tree = [];
+  const probsByLevel = { 2: [], 4: [] }; // Pour tracker les probas par niveau
   
   for (const ourMove1 of ourMoves) {
     const node1 = {
@@ -840,6 +865,8 @@ const generateDecisionTree = (state, matrix, preselectedUs = null) => {
       const theirMove1 = theirData.move;
       const state2 = applyMove(state, ourMove1, theirMove1);
       
+      probsByLevel[2].push(theirData.probability);
+      
       const node2 = {
         type: 'them',
         move: theirMove1,
@@ -851,6 +878,7 @@ const generateDecisionTree = (state, matrix, preselectedUs = null) => {
       // Si le pairing est terminé après ce coup
       if (state2.phase === 'finished') {
         node2.finalScore = calculateTeamScore(state2.fixedDuels, matrix);
+        node2.forgottenRefused = extractForgottenRefused(state2);
         node1.children.push(node2);
         continue;
       }
@@ -875,12 +903,15 @@ const generateDecisionTree = (state, matrix, preselectedUs = null) => {
             const theirMove2 = theirData2.move;
             const state3 = applyMove(state2, ourMove2, theirMove2);
             
+            probsByLevel[4].push(theirData2.probability);
+            
             const node4 = {
               type: 'them',
               move: theirMove2,
               probability: theirData2.probability,
               level: 4,
-              finalScore: computeGuaranteedScore(state3, matrix)
+              finalScore: computeGuaranteedScore(state3, matrix),
+              forgottenRefused: extractForgottenRefused(state3)
             };
             
             node3.children.push(node4);
@@ -889,6 +920,7 @@ const generateDecisionTree = (state, matrix, preselectedUs = null) => {
           // Pas de coup adverse possible, calculer le score final
           const state3 = applyMove(state2, ourMove2, []);
           node3.finalScore = computeGuaranteedScore(state3, matrix);
+          node3.forgottenRefused = extractForgottenRefused(state3);
         }
         
         node2.children.push(node3);
@@ -900,7 +932,13 @@ const generateDecisionTree = (state, matrix, preselectedUs = null) => {
     tree.push(node1);
   }
   
-  return { nodes: tree, phase: state.phase };
+  // Calculer les probas max par niveau
+  const maxProbByLevel = {
+    2: probsByLevel[2].length > 0 ? Math.max(...probsByLevel[2]) : 0,
+    4: probsByLevel[4].length > 0 ? Math.max(...probsByLevel[4]) : 0
+  };
+  
+  return { nodes: tree, phase: state.phase, maxProbByLevel };
 };
 
 // Trouve le meilleur score dans un sous-arbre
@@ -2155,7 +2193,7 @@ function PairingEngine() {
               
               <div className="p-4 overflow-auto flex-1 font-mono text-sm">
                 {(() => {
-                  const tree = generateDecisionTree(state, matrix, selectedUs.length > 0 ? selectedUs : null);
+                  const tree = generateDecisionTree(state, matrix, selectedUs.length > 0 ? selectedUs : null, data.myTeam.players, opponent.players);
                   
                   if (tree.nodes.length === 0) {
                     return <p className="text-gray-400 text-center">Aucune donnée disponible</p>;
@@ -2170,6 +2208,9 @@ function PairingEngine() {
                   tree.nodes.forEach(collectScores);
                   const bestScore = Math.max(...allFinalScores);
                   const worstScore = Math.min(...allFinalScores);
+                  
+                  // Probas max par niveau
+                  const maxProbByLevel = tree.maxProbByLevel || { 2: 0, 4: 0 };
                   
                   // Fonction récursive pour rendre l'arbre
                   const renderNode = (node, depth = 0, prefix = '', isLast = true) => {
@@ -2186,10 +2227,13 @@ function PairingEngine() {
                       return player?.factionShort || player?.faction?.slice(0, 4) || `J${i+1}`;
                     }).join(' + ');
                     
-                    // Probabilité (pour les coups adverses)
-                    const probText = !isUs && showTreeProbabilities && node.probability !== undefined 
-                      ? ` (${node.probability}%)` 
-                      : '';
+                    // Probabilité (pour les coups adverses) avec coloration verte si max du niveau
+                    let probElement = null;
+                    if (!isUs && showTreeProbabilities && node.probability !== undefined) {
+                      const isMaxProb = node.probability === maxProbByLevel[node.level];
+                      const probClass = isMaxProb ? 'text-green-400 font-bold' : 'text-gray-500';
+                      probElement = <span className={probClass}> ({node.probability}%)</span>;
+                    }
                     
                     // Score final
                     let scoreText = '';
@@ -2202,6 +2246,28 @@ function PairingEngine() {
                       } else if (node.finalScore < 55) {
                         scoreText += ' ⚠️';
                         scoreClass = 'text-red-400';
+                      }
+                    }
+                    
+                    // Oubliés/Refusés
+                    let forgottenRefusedElement = null;
+                    if (node.forgottenRefused) {
+                      const fr = node.forgottenRefused;
+                      const parts = [];
+                      if (fr.forgotten) {
+                        const forgottenUs = getOurPlayer(fr.forgotten.us)?.factionShort || `J${fr.forgotten.us+1}`;
+                        const forgottenThem = getTheirPlayer(fr.forgotten.them)?.factionShort || `J${fr.forgotten.them+1}`;
+                        parts.push(`👻 ${forgottenUs} vs ${forgottenThem} (${fr.forgotten.symbol})`);
+                      }
+                      if (fr.refused) {
+                        const refusedUs = getOurPlayer(fr.refused.us)?.factionShort || `J${fr.refused.us+1}`;
+                        const refusedThem = getTheirPlayer(fr.refused.them)?.factionShort || `J${fr.refused.them+1}`;
+                        parts.push(`🚫 ${refusedUs} vs ${refusedThem} (${fr.refused.symbol})`);
+                      }
+                      if (parts.length > 0) {
+                        forgottenRefusedElement = (
+                          <span className="text-gray-500 text-xs ml-2">| {parts.join(' | ')}</span>
+                        );
                       }
                     }
                     
@@ -2224,8 +2290,9 @@ function PairingEngine() {
                           {levelLabel}
                           <span>{icon}</span>
                           <span className={colorClass}> {moveText}</span>
-                          <span className="text-gray-500">{probText}</span>
+                          {probElement}
                           <span className={scoreClass}>{scoreText}</span>
+                          {forgottenRefusedElement}
                         </div>
                         {node.children && node.children.map((child, idx) => 
                           renderNode(child, depth + 1, childPrefix, idx === node.children.length - 1)
@@ -2243,11 +2310,13 @@ function PairingEngine() {
                       ))}
                       
                       <div className="mt-4 pt-4 border-t border-gray-600 text-xs text-gray-400">
-                        <div className="flex gap-6">
+                        <div className="flex flex-wrap gap-4">
                           <span>🔵 Notre choix</span>
                           <span>🔴 Réponse adverse</span>
-                          <span className="text-green-400">✅ Meilleur score ({bestScore})</span>
-                          <span className="text-red-400">⚠️ Risque défaite (&lt;55)</span>
+                          <span className="text-green-400">✅ Meilleur ({bestScore})</span>
+                          <span className="text-red-400">⚠️ Défaite (&lt;55)</span>
+                          <span>👻 Oublié</span>
+                          <span>🚫 Refusé</span>
                         </div>
                       </div>
                     </div>
