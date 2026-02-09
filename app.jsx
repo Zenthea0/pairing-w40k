@@ -3157,52 +3157,28 @@ function PairingEngine() {
   // EXPORT IMAGE FUNCTION
   // ============================================
   const exportPairingImage = (roundIndex, pairingStateParam = null) => {
-    console.log('exportPairingImage called with roundIndex:', roundIndex);
-    console.log('pairingStateParam:', pairingStateParam);
-    console.log('pairingState (from hook):', pairingState);
-    
     const round = roundIndex !== null && roundIndex !== undefined ? data.rounds?.[roundIndex] : null;
     // Utiliser pairingStateParam s'il est fourni, sinon pairingState du hook
     const currentPairingState = pairingStateParam || pairingState;
     const pairingResult = round?.pairingResult || currentPairingState;
     
-    console.log('round:', round);
-    console.log('pairingResult:', pairingResult);
-    
-    if (!pairingResult) {
-      console.log('No pairingResult, returning');
-      alert('Erreur: Aucun résultat de pairing trouvé');
-      return;
-    }
+    if (!pairingResult) return;
     
     const opponentIndex = pairingResult.opponentIndex ?? currentPairingState?.opponentIndex ?? data.selectedOpponentIndex;
     const opponent = data.opponents[opponentIndex];
     const matrix = opponent?.matrix;
     
-    console.log('opponentIndex:', opponentIndex);
-    console.log('opponent:', opponent);
-    
-    if (!opponent || !matrix) {
-      console.log('No opponent or matrix, returning');
-      alert('Erreur: Adversaire ou matrice non trouvé');
-      return;
-    }
+    if (!opponent || !matrix) return;
     
     // Pour un pairing libre, fixedDuels est directement sur pairingState
     const fixedDuels = pairingResult.fixedDuels || [];
-    console.log('fixedDuels:', fixedDuels);
-    
-    if (fixedDuels.length === 0) {
-      console.log('No fixedDuels, returning');
-      alert('Erreur: Aucun duel fixé');
-      return;
-    }
+    if (fixedDuels.length === 0) return;
     
     // Calculer le score si pas déjà présent
     const pairingScore = pairingResult.score ?? calculateTeamScore(fixedDuels, matrix);
     
     const duelScores = round?.duelScores || [];
-    const hasAllScores = duelScores.length === 6 && duelScores.every(d => d?.ourScore !== null);
+    const hasAllScores = duelScores.length === 6 && duelScores.every(d => d && d.ourScore !== null && d.ourScore !== undefined);
     
     // Facteur de résolution (2x pour meilleure qualité)
     const scale = 2;
@@ -3401,7 +3377,7 @@ function PairingEngine() {
       drawText(theirName, textStartX, duelY + 35, { size: 12, color: colors.red });
       
       // Score if available
-      if (duelScore?.ourScore !== null) {
+      if (duelScore && duelScore.ourScore !== null && duelScore.ourScore !== undefined) {
         drawText(`${duelScore.ourScore} - ${duelScore.theirScore}`, width - padding - 20, duelY + 25, { size: 14, bold: true, align: 'right' });
       }
       
