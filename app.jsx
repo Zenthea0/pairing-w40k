@@ -1181,6 +1181,60 @@ function PairingEngine() {
     }
   };
   
+  // Reprendre un pairing existant (sans le réinitialiser)
+  const resumePairing = () => {
+    const round = data.rounds?.[data.selectedRoundIndex];
+    if (!round?.pairingResult) return;
+    
+    const opponent = data.opponents[round.pairingResult.opponentIndex];
+    if (!opponent) return;
+    
+    // Reconstruire le pairingState à partir du pairingResult sauvegardé
+    const pairingResult = round.pairingResult;
+    
+    // Calculer les stats initiales pour la notation finale
+    const initialStats = pairingResult.initialStats || calculatePairingStats(opponent.matrix);
+    const initialGuaranteed = pairingResult.initialGuaranteed || 60;
+    
+    // Reconstruire l'état du pairing
+    // Si le pairing est terminé (6 duels fixés), on restaure l'état final
+    const isFinished = pairingResult.fixedDuels?.length === 6;
+    
+    // Calculer les joueurs encore disponibles
+    const usedUs = new Set(pairingResult.fixedDuels?.map(d => d.us) || []);
+    const usedThem = new Set(pairingResult.fixedDuels?.map(d => d.them) || []);
+    const availableUs = [0, 1, 2, 3, 4, 5].filter(i => !usedUs.has(i));
+    const availableThem = [0, 1, 2, 3, 4, 5].filter(i => !usedThem.has(i));
+    
+    setPairingState({
+      phase: isFinished ? 'finished' : (pairingResult.phase || 'finished'),
+      us: { 
+        available: availableUs,
+        defender: pairingResult.pairingDetails?.cycle2?.usDefender ?? null, 
+        attackers: pairingResult.pairingDetails?.cycle2?.usAttackers || []
+      },
+      them: { 
+        available: availableThem,
+        defender: pairingResult.pairingDetails?.cycle2?.themDefender ?? null, 
+        attackers: pairingResult.pairingDetails?.cycle2?.themAttackers || []
+      },
+      fixedDuels: pairingResult.fixedDuels || [],
+      opponentIndex: pairingResult.opponentIndex,
+      roundIndex: data.selectedRoundIndex,
+      pairingDetails: pairingResult.pairingDetails || {},
+      initialStats,
+      initialGuaranteed,
+      score: pairingResult.score,
+    });
+    
+    setCurrentRoundIndex(data.selectedRoundIndex);
+    setHistory([]);
+    setSelectedUs([]);
+    setSelectedThem([]);
+    setShowStartPairingConfirm(false);
+    setCurrentPage('pairing');
+  };
+  
   // ============================================
   // PAIRING FUNCTIONS - USE INDICES NOT IDS
   // ============================================
@@ -1469,29 +1523,32 @@ function PairingEngine() {
             {showStartPairingConfirm && (
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
                 <div className="bg-gray-800 rounded-lg p-6 max-w-md mx-4">
-                  <h3 className="text-lg font-bold mb-2 text-yellow-400">⚠️ Attention</h3>
+                  <h3 className="text-lg font-bold mb-2 text-yellow-400">⚠️ Pairing existant</h3>
                   <p className="text-gray-300 mb-4">
-                    Un pairing a déjà été réalisé pour cette ronde. En continuant :
+                    Un pairing a déjà été réalisé pour cette ronde. Que souhaitez-vous faire ?
                   </p>
-                  <ul className="text-gray-400 text-sm mb-4 list-disc list-inside space-y-1">
-                    <li>Le pairing existant sera supprimé</li>
-                    <li>Les scores des matchs seront réinitialisés</li>
-                  </ul>
-                  <p className="text-gray-300 mb-4">Voulez-vous continuer ?</p>
-                  <div className="flex gap-3 justify-end">
+                  <div className="space-y-3 mb-4">
                     <button 
-                      onClick={() => setShowStartPairingConfirm(false)} 
-                      className="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600"
+                      onClick={resumePairing} 
+                      className="w-full px-4 py-3 bg-blue-600 rounded hover:bg-blue-500 text-left"
                     >
-                      Annuler
+                      <div className="font-semibold">📂 Reprendre le pairing</div>
+                      <div className="text-sm text-blue-200">Continuer avec le pairing existant (scores conservés)</div>
                     </button>
                     <button 
                       onClick={startPairing} 
-                      className="px-4 py-2 bg-yellow-600 rounded hover:bg-yellow-500"
+                      className="w-full px-4 py-3 bg-yellow-600 rounded hover:bg-yellow-500 text-left"
                     >
-                      Confirmer et relancer
+                      <div className="font-semibold">🔄 Réinitialiser le pairing</div>
+                      <div className="text-sm text-yellow-200">Supprimer et recommencer à zéro</div>
                     </button>
                   </div>
+                  <button 
+                    onClick={() => setShowStartPairingConfirm(false)} 
+                    className="w-full px-4 py-2 bg-gray-700 rounded hover:bg-gray-600"
+                  >
+                    Annuler
+                  </button>
                 </div>
               </div>
             )}
@@ -3068,16 +3125,23 @@ function PairingEngine() {
   // EXPORT IMAGE FUNCTION
   // ============================================
   const exportPairingImage = (roundIndex) => {
-    const round = roundIndex !== null ? data.rounds?.[roundIndex] : null;
+    const round = roundIndex !== null && roundIndex !== undefined ? data.rounds?.[roundIndex] : null;
     const pairingResult = round?.pairingResult || pairingState;
     
     if (!pairingResult) return;
     
-    const opponentIndex = pairingResult.opponentIndex ?? pairingState?.opponentIndex;
+    const opponentIndex = pairingResult.opponentIndex ?? pairingState?.opponentIndex ?? data.selectedOpponentIndex;
     const opponent = data.opponents[opponentIndex];
     const matrix = opponent?.matrix;
     
     if (!opponent || !matrix) return;
+    
+    // Pour un pairing libre, fixedDuels est directement sur pairingState
+    const fixedDuels = pairingResult.fixedDuels || [];
+    if (fixedDuels.length === 0) return;
+    
+    // Calculer le score si pas déjà présent
+    const pairingScore = pairingResult.score ?? calculateTeamScore(fixedDuels, matrix);
     
     const duelScores = round?.duelScores || [];
     const hasAllScores = duelScores.length === 6 && duelScores.every(d => d?.ourScore !== null);
@@ -3162,7 +3226,6 @@ function PairingEngine() {
     drawRoundedRect(padding, y, width - 2 * padding, 75, 8, colors.cardBg);
     drawText('SCORES', padding + 15, y + 20, { size: 12, bold: true, color: colors.textMuted });
     
-    const pairingScore = pairingResult.score || 0;
     drawText('Score Pairing Cible', padding + 15, y + 42, { size: 12, color: colors.textMuted });
     drawText(`${pairingScore} / 120`, width - padding - 15, y + 42, { size: 16, bold: true, color: colors.blue, align: 'right' });
     
@@ -3247,7 +3310,6 @@ function PairingEngine() {
     drawRoundedRect(padding, y, width - 2 * padding, duelsHeight, 8, colors.cardBg);
     drawText('DUELS', padding + 15, y + 20, { size: 12, bold: true, color: colors.textMuted });
     
-    const fixedDuels = pairingResult.fixedDuels || [];
     const typeEmojis = { defense: '🛡️', attack: '⚔️', forgotten: '👻', refused: '🚫' };
     
     fixedDuels.forEach((duel, i) => {
