@@ -3905,6 +3905,7 @@ function PairingEngine() {
         return {
           phaseNum,
           ourChoice,
+          theirChoice,
           ourGuaranteed: ourMoveData.guaranteed,
           bestChoice: bestMove.move,
           bestGuaranteed: bestMove.guaranteed,
@@ -4125,15 +4126,34 @@ function PairingEngine() {
                 {pairingErrors.phases.map((phase, i) => {
                   const isAssignPhase = phase.phaseNum === 3 || phase.phaseNum === 6;
                   return (
-                    <div key={i} className={`bg-gray-700 rounded p-3 border-l-4 ${
+                    <div key={i} className={`bg-gray-700 rounded overflow-hidden border-l-4 ${
                       phase.verdict === 'OPTIMAL' ? 'border-green-500' : 
                       phase.verdict === 'ERREUR MINEURE' ? 'border-yellow-500' : 'border-red-500'
                     }`}>
-                      <div className="flex justify-between items-start mb-2">
+                      {/* En-tête */}
+                      <div className="flex justify-between items-center p-3 bg-gray-750">
                         <span className="font-semibold">Phase {phase.phaseNum} - {PHASE_NAMES[phase.phaseNum]}</span>
                         <span className={`text-sm font-bold ${phase.verdictClass}`}>{phase.icon} {phase.verdict}</span>
                       </div>
-                      <div className="text-sm space-y-1">
+                      
+                      {/* Choix côte à côte */}
+                      <div className="grid grid-cols-2 divide-x divide-gray-600">
+                        <div className="p-3 bg-blue-900/20">
+                          <div className="text-xs text-gray-400 mb-1">🔵 Nous</div>
+                          <div className="font-semibold text-blue-400">
+                            {formatChoice(phase.ourChoice, isAssignPhase)}
+                          </div>
+                        </div>
+                        <div className="p-3 bg-red-900/20">
+                          <div className="text-xs text-gray-400 mb-1">🔴 Adversaire</div>
+                          <div className="font-semibold text-red-400">
+                            {formatChoice(phase.theirChoice, !isAssignPhase)}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Analyse */}
+                      <div className="p-3 text-sm space-y-1 border-t border-gray-600">
                         <div className="flex justify-between">
                           <span className="text-gray-400">Ton choix :</span>
                           <span>{formatChoice(phase.ourChoice, isAssignPhase)} → Garanti: {phase.ourGuaranteed.toFixed(1)}</span>
