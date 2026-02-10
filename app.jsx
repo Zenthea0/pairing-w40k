@@ -1090,6 +1090,9 @@ function PairingEngine() {
   const [showDecisionTree, setShowDecisionTree] = useState(false);
   const [showTreeProbabilities, setShowTreeProbabilities] = useState(false);
   
+  // Bilan page state
+  const [bilanRoundIndex, setBilanRoundIndex] = useState(null);
+  
   // Current round being played
   const [currentRoundIndex, setCurrentRoundIndex] = useState(null);
   
@@ -3779,6 +3782,500 @@ function PairingEngine() {
     link.click();
   };
   
+  // ============================================
+  // RENDER BILAN PAGE
+  // ============================================
+  const renderBilan = () => {
+    // Trouver les rondes avec pairing terminé et des scores
+    const completedRounds = data.rounds
+      .map((r, i) => ({ round: r, index: i }))
+      .filter(({ round }) => 
+        round.pairingResult?.fixedDuels?.length === 6 && 
+        round.duelScores?.some(d => d?.ourScore !== null && d?.ourScore !== undefined)
+      );
+    
+    if (completedRounds.length === 0) {
+      return (
+        <div className="p-4">
+          <h2 className="text-xl font-bold mb-4">📈 Bilan</h2>
+          <div className="bg-gray-800 rounded-lg p-6 text-center">
+            <p className="text-gray-400">Aucune ronde avec des scores saisis.</p>
+            <button
+              onClick={() => setCurrentPage('settings')}
+              className="mt-4 px-4 py-2 bg-blue-600 rounded hover:bg-blue-500"
+            >
+              ← Retour aux paramètres
+            </button>
+          </div>
+        </div>
+      );
+    }
+    
+    // Sélectionner la première ronde par défaut si aucune n'est sélectionnée
+    if (bilanRoundIndex === null || !completedRounds.some(r => r.index === bilanRoundIndex)) {
+      setBilanRoundIndex(completedRounds[0].index);
+      return null;
+    }
+    
+    const round = data.rounds[bilanRoundIndex];
+    const pairingResult = round.pairingResult;
+    const duelScores = round.duelScores || [];
+    const opponent = data.opponents[pairingResult.opponentIndex];
+    const matrix = opponent?.matrix;
+    
+    if (!opponent || !matrix) {
+      return (
+        <div className="p-4">
+          <h2 className="text-xl font-bold mb-4">📈 Bilan</h2>
+          <div className="bg-gray-800 rounded-lg p-6 text-center">
+            <p className="text-gray-400">Données de l'adversaire non disponibles.</p>
+          </div>
+        </div>
+      );
+    }
+    
+    const getOurPlayer = (idx) => data.myTeam.players[idx];
+    const getTheirPlayer = (idx) => opponent.players[idx];
+    
+    // ========================================
+    // PARTIE 1 : Analyse des erreurs de pairing
+    // ========================================
+    
+    const analyzePairingErrors = () => {
+      const details = pairingResult.pairingDetails;
+      if (!details) return { phases: [], summary: { optimal: 0, minor: 0, major: 0, totalLoss: 0 } };
+      
+      const phases = [];
+      
+      // Reconstruire l'état initial
+      const initialState = {
+        phase: 1,
+        us: { available: [0, 1, 2, 3, 4, 5], defender: null, attackers: [] },
+        them: { available: [0, 1, 2, 3, 4, 5], defender: null, attackers: [] },
+        fixedDuels: [],
+      };
+      
+      // Fonction pour analyser une phase
+      const analyzePhase = (state, phaseNum, ourChoice, theirChoice) => {
+        const ourMoves = generateLegalMoves(state, 'us');
+        if (ourMoves.length === 0) return null;
+        
+        // Calculer le score garanti pour chaque choix possible
+        const moveScores = ourMoves.map(move => {
+          const moveKey = JSON.stringify([...move].sort());
+          const choiceKey = JSON.stringify([...ourChoice].sort());
+          const isOurChoice = moveKey === choiceKey;
+          
+          // Calculer le score garanti pour ce coup
+          let guaranteed;
+          if (ourMoves.length === 1) {
+            // Un seul coup possible, pas de choix
+            const newState = applyMove(state, move, theirChoice);
+            guaranteed = computeGuaranteedScore(newState, matrix);
+          } else {
+            guaranteed = computeGuaranteedScoreForMove(state, matrix, move);
+          }
+          
+          return { move, guaranteed, isOurChoice };
+        });
+        
+        // Trier par score garanti décroissant
+        moveScores.sort((a, b) => b.guaranteed - a.guaranteed);
+        
+        const bestMove = moveScores[0];
+        const ourMoveData = moveScores.find(m => m.isOurChoice);
+        
+        if (!ourMoveData) return null;
+        
+        const loss = bestMove.guaranteed - ourMoveData.guaranteed;
+        let verdict = 'OPTIMAL';
+        let verdictClass = 'text-green-400';
+        let icon = '✅';
+        
+        if (loss > 0 && loss < 5) {
+          verdict = 'ERREUR MINEURE';
+          verdictClass = 'text-yellow-400';
+          icon = '⚠️';
+        } else if (loss >= 5) {
+          verdict = 'ERREUR MAJEURE';
+          verdictClass = 'text-red-400';
+          icon = '❌';
+        }
+        
+        return {
+          phaseNum,
+          ourChoice,
+          ourGuaranteed: ourMoveData.guaranteed,
+          bestChoice: bestMove.move,
+          bestGuaranteed: bestMove.guaranteed,
+          loss,
+          verdict,
+          verdictClass,
+          icon,
+        };
+      };
+      
+      // Phase 1 : Défenseur 1
+      let currentState = { ...initialState };
+      const phase1 = analyzePhase(
+        currentState, 
+        1, 
+        [details.cycle1?.usDefender], 
+        [details.cycle1?.themDefender]
+      );
+      if (phase1) phases.push(phase1);
+      
+      // Appliquer phase 1
+      currentState = applyMove(currentState, [details.cycle1?.usDefender], [details.cycle1?.themDefender]);
+      
+      // Phase 2 : Attaquants 1
+      const phase2 = analyzePhase(
+        currentState,
+        2,
+        details.cycle1?.usAttackers || [],
+        details.cycle1?.themAttackers || []
+      );
+      if (phase2) phases.push(phase2);
+      
+      // Appliquer phase 2
+      currentState = applyMove(currentState, details.cycle1?.usAttackers || [], details.cycle1?.themAttackers || []);
+      
+      // Phase 3 : Assignation 1 (on choisit parmi les attaquants adverses)
+      const phase3 = analyzePhase(
+        currentState,
+        3,
+        [details.cycle1?.themChosenAttacker],
+        [details.cycle1?.usChosenAttacker]
+      );
+      if (phase3) phases.push(phase3);
+      
+      // Appliquer phase 3
+      currentState = applyMove(currentState, [details.cycle1?.themChosenAttacker], [details.cycle1?.usChosenAttacker]);
+      
+      // Phase 4 : Défenseur 2
+      const phase4 = analyzePhase(
+        currentState,
+        4,
+        [details.cycle2?.usDefender],
+        [details.cycle2?.themDefender]
+      );
+      if (phase4) phases.push(phase4);
+      
+      // Appliquer phase 4
+      currentState = applyMove(currentState, [details.cycle2?.usDefender], [details.cycle2?.themDefender]);
+      
+      // Phase 5 : Attaquants 2
+      const phase5 = analyzePhase(
+        currentState,
+        5,
+        details.cycle2?.usAttackers || [],
+        details.cycle2?.themAttackers || []
+      );
+      if (phase5) phases.push(phase5);
+      
+      // Appliquer phase 5
+      currentState = applyMove(currentState, details.cycle2?.usAttackers || [], details.cycle2?.themAttackers || []);
+      
+      // Phase 6 : Assignation 2
+      const phase6 = analyzePhase(
+        currentState,
+        6,
+        [details.cycle2?.themChosenAttacker],
+        [details.cycle2?.usChosenAttacker]
+      );
+      if (phase6) phases.push(phase6);
+      
+      // Calculer le résumé
+      const summary = {
+        optimal: phases.filter(p => p.verdict === 'OPTIMAL').length,
+        minor: phases.filter(p => p.verdict === 'ERREUR MINEURE').length,
+        major: phases.filter(p => p.verdict === 'ERREUR MAJEURE').length,
+        totalLoss: phases.reduce((sum, p) => sum + p.loss, 0),
+      };
+      
+      return { phases, summary };
+    };
+    
+    // ========================================
+    // PARTIE 2 : Calibration de la matrice
+    // ========================================
+    
+    const analyzeCalibration = () => {
+      const fixedDuels = pairingResult.fixedDuels || [];
+      
+      const symbolToExpected = { '++': 17, '+': 13, '=': 10, '-': 7, '--': 3 };
+      const symbolToTolerance = { '++': 3, '+': 2, '=': 1, '-': 2, '--': 3 };
+      
+      const duelsAnalysis = fixedDuels.map((duel, i) => {
+        const score = duelScores[i];
+        const ourScore = score?.ourScore;
+        const symbol = getMatrixValue(matrix, duel.us, duel.them);
+        const expected = symbolToExpected[symbol] || 10;
+        const tolerance = symbolToTolerance[symbol] || 2;
+        
+        const hasScore = ourScore !== null && ourScore !== undefined;
+        const ecart = hasScore ? ourScore - expected : null;
+        const isOk = hasScore ? Math.abs(ecart) <= tolerance : null;
+        
+        return {
+          duel,
+          type: duel.type,
+          ourPlayer: getOurPlayer(duel.us),
+          theirPlayer: getTheirPlayer(duel.them),
+          symbol,
+          expected,
+          ourScore,
+          ecart,
+          tolerance,
+          isOk,
+        };
+      });
+      
+      const calibrated = duelsAnalysis.filter(d => d.isOk === true).length;
+      const toReview = duelsAnalysis.filter(d => d.isOk === false);
+      
+      return { duels: duelsAnalysis, calibrated, toReview };
+    };
+    
+    const pairingErrors = analyzePairingErrors();
+    const calibration = analyzeCalibration();
+    
+    const PHASE_NAMES = {
+      1: 'Choix Défenseur 1',
+      2: 'Choix Attaquants 1',
+      3: 'Assignation 1',
+      4: 'Choix Défenseur 2',
+      5: 'Choix Attaquants 2',
+      6: 'Assignation 2',
+    };
+    
+    const TYPE_ICONS = { defense: '🛡️', attack: '⚔️', forgotten: '👻', refused: '🚫' };
+    
+    // Calculer le score total
+    const totalScore = duelScores.reduce((sum, d) => sum + (d?.ourScore || 0), 0);
+    const predictedScore = pairingResult.score || calculateTeamScore(pairingResult.fixedDuels, matrix);
+    
+    // Fonction pour formater un choix (indices -> noms)
+    const formatChoice = (indices, isAssignPhase = false) => {
+      if (!indices || indices.length === 0) return '?';
+      // En phase d'assignation, les indices correspondent aux joueurs adverses
+      const getPlayer = isAssignPhase ? getTheirPlayer : getOurPlayer;
+      return indices.map(i => {
+        const p = getPlayer(i);
+        return p?.factionShort || p?.faction?.slice(0, 4) || `J${i+1}`;
+      }).join(' + ');
+    };
+    
+    return (
+      <div className="p-4 max-w-4xl mx-auto">
+        <h2 className="text-xl font-bold mb-4">📈 Bilan</h2>
+        
+        {/* Sélecteur de ronde */}
+        <div className="bg-gray-800 rounded-lg p-4 mb-4">
+          <label className="block text-sm text-gray-400 mb-2">Sélectionner une ronde</label>
+          <select
+            value={bilanRoundIndex ?? ''}
+            onChange={(e) => setBilanRoundIndex(Number(e.target.value))}
+            className="w-full bg-gray-700 rounded px-3 py-2"
+          >
+            {completedRounds.map(({ round, index }) => (
+              <option key={index} value={index}>
+                {round.name} vs {data.opponents[round.pairingResult?.opponentIndex]?.name || 'Adversaire'}
+              </option>
+            ))}
+          </select>
+        </div>
+        
+        {/* Résumé général */}
+        <div className="bg-gray-800 rounded-lg p-4 mb-4">
+          <h3 className="text-lg font-semibold mb-3">📊 Résumé - {round.name} vs {opponent.name}</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-gray-700 rounded p-3 text-center">
+              <div className="text-2xl font-bold text-blue-400">{predictedScore}</div>
+              <div className="text-xs text-gray-400">Score prédit</div>
+            </div>
+            <div className="bg-gray-700 rounded p-3 text-center">
+              <div className="text-2xl font-bold text-green-400">{totalScore}</div>
+              <div className="text-xs text-gray-400">Score réel</div>
+            </div>
+            <div className="bg-gray-700 rounded p-3 text-center">
+              <div className={`text-2xl font-bold ${totalScore >= predictedScore ? 'text-green-400' : 'text-red-400'}`}>
+                {totalScore >= predictedScore ? '+' : ''}{totalScore - predictedScore}
+              </div>
+              <div className="text-xs text-gray-400">Écart</div>
+            </div>
+            <div className="bg-gray-700 rounded p-3 text-center">
+              <div className={`text-2xl font-bold ${pairingErrors.summary.totalLoss === 0 ? 'text-green-400' : 'text-red-400'}`}>
+                -{pairingErrors.summary.totalLoss.toFixed(1)}
+              </div>
+              <div className="text-xs text-gray-400">Pts perdus (pairing)</div>
+            </div>
+          </div>
+        </div>
+        
+        {/* Partie 1 : Analyse des erreurs de pairing */}
+        <div className="bg-gray-800 rounded-lg p-4 mb-4">
+          <h3 className="text-lg font-semibold mb-3">🎯 Analyse du Pairing</h3>
+          
+          {pairingErrors.phases.length === 0 ? (
+            <p className="text-gray-400">Données de pairing non disponibles pour l'analyse.</p>
+          ) : (
+            <>
+              <div className="space-y-3 mb-4">
+                {pairingErrors.phases.map((phase, i) => {
+                  const isAssignPhase = phase.phaseNum === 3 || phase.phaseNum === 6;
+                  return (
+                    <div key={i} className={`bg-gray-700 rounded p-3 border-l-4 ${
+                      phase.verdict === 'OPTIMAL' ? 'border-green-500' : 
+                      phase.verdict === 'ERREUR MINEURE' ? 'border-yellow-500' : 'border-red-500'
+                    }`}>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="font-semibold">Phase {phase.phaseNum} - {PHASE_NAMES[phase.phaseNum]}</span>
+                        <span className={`text-sm font-bold ${phase.verdictClass}`}>{phase.icon} {phase.verdict}</span>
+                      </div>
+                      <div className="text-sm space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Ton choix :</span>
+                          <span>{formatChoice(phase.ourChoice, isAssignPhase)} → Garanti: {phase.ourGuaranteed.toFixed(1)}</span>
+                        </div>
+                        {phase.loss > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Meilleur choix :</span>
+                            <span className="text-green-400">{formatChoice(phase.bestChoice, isAssignPhase)} → Garanti: {phase.bestGuaranteed.toFixed(1)}</span>
+                          </div>
+                        )}
+                        {phase.loss > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-400">Perte :</span>
+                            <span className="text-red-400">-{phase.loss.toFixed(1)} points</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              
+              {/* Résumé pairing */}
+              <div className="bg-gray-700 rounded p-3">
+                <div className="grid grid-cols-4 gap-2 text-center text-sm">
+                  <div>
+                    <div className="text-green-400 font-bold">{pairingErrors.summary.optimal}</div>
+                    <div className="text-gray-400 text-xs">Optimales</div>
+                  </div>
+                  <div>
+                    <div className="text-yellow-400 font-bold">{pairingErrors.summary.minor}</div>
+                    <div className="text-gray-400 text-xs">Mineures</div>
+                  </div>
+                  <div>
+                    <div className="text-red-400 font-bold">{pairingErrors.summary.major}</div>
+                    <div className="text-gray-400 text-xs">Majeures</div>
+                  </div>
+                  <div>
+                    <div className="text-red-400 font-bold">-{pairingErrors.summary.totalLoss.toFixed(1)}</div>
+                    <div className="text-gray-400 text-xs">Total perdu</div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+        
+        {/* Partie 2 : Calibration de la matrice */}
+        <div className="bg-gray-800 rounded-lg p-4 mb-4">
+          <h3 className="text-lg font-semibold mb-3">🎯 Calibration de la Matrice</h3>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-gray-400 border-b border-gray-600">
+                  <th className="text-left p-2">Duel</th>
+                  <th className="text-left p-2">Matchup</th>
+                  <th className="text-center p-2">Prédit</th>
+                  <th className="text-center p-2">Réel</th>
+                  <th className="text-center p-2">Écart</th>
+                  <th className="text-center p-2">Verdict</th>
+                </tr>
+              </thead>
+              <tbody>
+                {calibration.duels.map((d, i) => (
+                  <tr key={i} className="border-b border-gray-700">
+                    <td className="p-2">{TYPE_ICONS[d.type]} {d.type === 'defense' ? 'Def' : d.type === 'attack' ? 'Att' : d.type === 'forgotten' ? 'Oubl' : 'Ref'}</td>
+                    <td className="p-2">
+                      <span className="text-blue-400">{d.ourPlayer?.factionShort || '?'}</span>
+                      <span className="text-gray-400"> vs </span>
+                      <span className="text-red-400">{d.theirPlayer?.factionShort || '?'}</span>
+                    </td>
+                    <td className="text-center p-2">
+                      <span className={`px-2 py-0.5 rounded ${
+                        d.symbol === '++' ? 'bg-green-800 text-green-200' :
+                        d.symbol === '+' ? 'bg-green-900 text-green-300' :
+                        d.symbol === '=' ? 'bg-gray-600' :
+                        d.symbol === '-' ? 'bg-red-900 text-red-300' :
+                        'bg-red-800 text-red-200'
+                      }`}>{d.symbol} ({d.expected})</span>
+                    </td>
+                    <td className="text-center p-2 font-bold">
+                      {d.ourScore !== null && d.ourScore !== undefined ? d.ourScore : '-'}
+                    </td>
+                    <td className="text-center p-2">
+                      {d.ecart !== null ? (
+                        <span className={d.ecart >= 0 ? 'text-green-400' : 'text-red-400'}>
+                          {d.ecart >= 0 ? '+' : ''}{d.ecart}
+                        </span>
+                      ) : '-'}
+                    </td>
+                    <td className="text-center p-2">
+                      {d.isOk === true && <span className="text-green-400">✅ OK</span>}
+                      {d.isOk === false && <span className="text-yellow-400">⚠️ Revoir</span>}
+                      {d.isOk === null && <span className="text-gray-500">-</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          
+          {/* Résumé calibration */}
+          <div className="bg-gray-700 rounded p-3 mt-4">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-gray-400">Matchups bien calibrés :</span>
+              <span className="font-bold">{calibration.calibrated} / {calibration.duels.filter(d => d.isOk !== null).length}</span>
+            </div>
+            {calibration.toReview.length > 0 && (
+              <div>
+                <div className="text-yellow-400 text-sm mb-1">⚠️ Matchups à revoir :</div>
+                <ul className="text-sm text-gray-300 space-y-1">
+                  {calibration.toReview.map((d, i) => {
+                    const suggestion = d.ecart > 0 
+                      ? (d.symbol === '=' ? '+' : d.symbol === '+' ? '++' : d.symbol === '-' ? '=' : d.symbol === '--' ? '-' : d.symbol)
+                      : (d.symbol === '=' ? '-' : d.symbol === '-' ? '--' : d.symbol === '+' ? '=' : d.symbol === '++' ? '+' : d.symbol);
+                    return (
+                      <li key={i}>
+                        <span className="text-blue-400">{d.ourPlayer?.factionShort}</span>
+                        <span> vs </span>
+                        <span className="text-red-400">{d.theirPlayer?.factionShort}</span>
+                        <span> : prédit "{d.symbol}" ({d.expected}), réel {d.ourScore} ({d.ecart >= 0 ? '+' : ''}{d.ecart})</span>
+                        <span className="text-yellow-400"> → Suggestion : "{suggestion}" ?</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+        
+        {/* Bouton retour */}
+        <button
+          onClick={() => setCurrentPage('settings')}
+          className="w-full py-3 bg-gray-700 rounded-lg hover:bg-gray-600"
+        >
+          ← Retour aux paramètres
+        </button>
+      </div>
+    );
+  };
   
   // ============================================
   // MAIN RENDER
@@ -3835,6 +4332,28 @@ function PairingEngine() {
                 📝 Scores
               </button>
               <button
+                onClick={() => { 
+                  // Trouver la première ronde avec un pairing terminé et des scores
+                  const firstCompletedRound = data.rounds.findIndex(r => 
+                    r.pairingResult?.fixedDuels?.length === 6 && 
+                    r.duelScores?.some(d => d?.ourScore !== null && d?.ourScore !== undefined)
+                  );
+                  setBilanRoundIndex(firstCompletedRound >= 0 ? firstCompletedRound : null);
+                  setCurrentPage('bilan'); 
+                  setMenuOpen(false); 
+                }}
+                disabled={!data.rounds.some(r => 
+                  r.pairingResult?.fixedDuels?.length === 6 && 
+                  r.duelScores?.some(d => d?.ourScore !== null && d?.ourScore !== undefined)
+                )}
+                className={`w-full text-left px-4 py-3 hover:bg-gray-600 ${!data.rounds.some(r => 
+                  r.pairingResult?.fixedDuels?.length === 6 && 
+                  r.duelScores?.some(d => d?.ourScore !== null && d?.ourScore !== undefined)
+                ) ? 'opacity-50' : ''}`}
+              >
+                📈 Bilan
+              </button>
+              <button
                 onClick={() => { setCurrentPage('matrix'); setMenuOpen(false); }}
                 className="w-full text-left px-4 py-3 hover:bg-gray-600"
               >
@@ -3856,6 +4375,7 @@ function PairingEngine() {
       {currentPage === 'matrix' && renderMatrixEditor()}
       {currentPage === 'pairing' && renderPairing()}
       {currentPage === 'scores' && renderScores()}
+      {currentPage === 'bilan' && renderBilan()}
     </div>
   );
 }
