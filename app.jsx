@@ -75,7 +75,7 @@ const SYMBOL_CONFIG = {
 };
 
 const FORCES_DISPOSITIONS = [
-  { value: 'ELIM', label: 'Elim', full: 'Éliminez l\'adversaire' },
+  { value: 'ELIM', label: 'Elim', full: "Éliminez l'adversaire" },
   { value: 'PT',   label: 'PT',   full: 'Prendre et tenir' },
   { value: 'AP',   label: 'AP',   full: 'Atouts prioritaires' },
   { value: 'REC',  label: 'Rec',  full: 'Reconnaissance' },
@@ -2444,4 +2444,4 @@ function PairingEngine() {
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div>
-            <span clas
+            <span class
