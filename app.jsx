@@ -3557,7 +3557,8 @@ function PairingEngine() {
       if (!player) return '?';
       const faction = player.factionShort || player.faction?.slice(0, 4) || '';
       const pseudo = player.pseudo || '';
-      return faction ? `${faction} (${pseudo})` : pseudo;
+      const dispo = player.forcesDisposition ? ` [${getDispositionLabel(player.forcesDisposition)}]` : '';
+      return (faction ? `${faction} (${pseudo})` : pseudo) + dispo;
     };
     
     // Générer le PDF avec canvas (format portrait A4, haute résolution)
