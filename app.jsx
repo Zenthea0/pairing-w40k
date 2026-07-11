@@ -4299,8 +4299,14 @@ function PairingEngine() {
                     <td className="p-2">{TYPE_ICONS[d.type]} {d.type === 'defense' ? 'Def' : d.type === 'attack' ? 'Att' : d.type === 'forgotten' ? 'Oubl' : 'Ref'}</td>
                     <td className="p-2">
                       <span className="text-blue-400">{d.ourPlayer?.factionShort || '?'}</span>
+                      {d.ourPlayer?.forcesDisposition && (
+                        <span className="text-blue-300/60 text-xs"> [{getDispositionLabel(d.ourPlayer.forcesDisposition)}]</span>
+                      )}
                       <span className="text-gray-400"> vs </span>
                       <span className="text-red-400">{d.theirPlayer?.factionShort || '?'}</span>
+                      {d.theirPlayer?.forcesDisposition && (
+                        <span className="text-red-300/60 text-xs"> [{getDispositionLabel(d.theirPlayer.forcesDisposition)}]</span>
+                      )}
                     </td>
                     <td className="text-center p-2">
                       <span className={`px-2 py-0.5 rounded ${
