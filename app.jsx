@@ -92,6 +92,15 @@ const getDispositionFull = (value) => {
   return d ? d.full : '';
 };
 
+// Retourne la lettre de table imposée pour les duels oublié/refusé selon la ronde
+// roundIndex 0 (Ronde 1) -> A, 1 -> B, 2 -> C, 3 -> A, 4 -> B
+// En mode pairing libre (roundIndex null/undefined), traiter comme Ronde 1 -> A
+const getImposedTable = (roundIndex) => {
+  const mapping = ['A', 'B', 'C', 'A', 'B'];
+  const idx = (roundIndex === null || roundIndex === undefined) ? 0 : roundIndex;
+  return mapping[idx] || 'A';
+};
+
 const PHASES = {
   1: { name: 'Défenseur 1', description: 'Chaque équipe choisit 1 défenseur' },
   2: { name: 'Attaquants', description: 'Chaque équipe choisit 2 attaquants' },
@@ -2129,6 +2138,15 @@ function PairingEngine() {
       setHistory([...history, { state }]);
       const newState = applyMove(state, selectedUs, selectedThem);
       
+      // Auto-remplissage des tables pour les duels oublié/refusé (imposé par la ronde)
+      const imposed = getImposedTable(state.roundIndex);
+      newState.fixedDuels = newState.fixedDuels.map(duel => {
+        if ((duel.type === 'forgotten' || duel.type === 'refused') && duel.table === null) {
+          return { ...duel, table: imposed };
+        }
+        return duel;
+      });
+      
       // Si le pairing est terminé, sauvegarder dans la ronde
       if (newState.phase === 'finished' && state.roundIndex !== null && state.roundIndex !== undefined) {
         const finalScore = calculateTeamScore(newState.fixedDuels, matrix);
@@ -2961,10 +2979,8 @@ function PairingEngine() {
                 const symbol = getMatrixValue(matrix, duel.us, duel.them);
                 const icons = { defense: '🛡️', attack: '⚔️', forgotten: '👻', refused: '🚫' };
                 
-                // Tables déjà assignées (exclure celle du duel actuel)
-                const usedTables = state.fixedDuels
-                  .filter((d, i) => i !== index && d.table !== null)
-                  .map(d => d.table);
+                // Les duels oublié/refusé ont une table imposée par la ronde, non modifiable
+                const isImposed = duel.type === 'forgotten' || duel.type === 'refused';
                 
                 return (
                   <div key={index} className="bg-gray-700 rounded p-2 text-sm">
@@ -2976,45 +2992,45 @@ function PairingEngine() {
                     </div>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-xs text-gray-400">Table:</span>
-                      <select
-                        value={duel.table ?? ''}
-                        onChange={(e) => {
-                          const newTable = e.target.value === '' ? null : Number(e.target.value);
-                          const newDuels = [...state.fixedDuels];
-                          newDuels[index] = { ...duel, table: newTable };
-                          setPairingState({ ...state, fixedDuels: newDuels });
-                          
-                          // Synchroniser avec duelScores si la ronde existe
-                          if (state.roundIndex !== null && state.roundIndex !== undefined) {
-                            const round = data.rounds?.[state.roundIndex];
-                            if (round?.duelScores) {
-                              const newRounds = [...data.rounds];
-                              const newDuelScores = [...round.duelScores];
-                              if (newDuelScores[index]) {
-                                newDuelScores[index] = { ...newDuelScores[index], table: newTable };
+                      {isImposed ? (
+                        <span className="text-xs bg-gray-600 rounded px-2 py-0.5" title="Table imposée par la ronde">
+                          {duel.table || '-'} (imposée)
+                        </span>
+                      ) : (
+                        <select
+                          value={duel.table ?? ''}
+                          onChange={(e) => {
+                            const newTable = e.target.value === '' ? null : e.target.value;
+                            const newDuels = [...state.fixedDuels];
+                            newDuels[index] = { ...duel, table: newTable };
+                            setPairingState({ ...state, fixedDuels: newDuels });
+                            
+                            // Synchroniser avec duelScores si la ronde existe
+                            if (state.roundIndex !== null && state.roundIndex !== undefined) {
+                              const round = data.rounds?.[state.roundIndex];
+                              if (round?.duelScores) {
+                                const newRounds = [...data.rounds];
+                                const newDuelScores = [...round.duelScores];
+                                if (newDuelScores[index]) {
+                                  newDuelScores[index] = { ...newDuelScores[index], table: newTable };
+                                }
+                                newRounds[state.roundIndex] = { 
+                                  ...round, 
+                                  duelScores: newDuelScores,
+                                  pairingResult: { ...round.pairingResult, fixedDuels: newDuels }
+                                };
+                                setData({ ...data, rounds: newRounds });
                               }
-                              newRounds[state.roundIndex] = { 
-                                ...round, 
-                                duelScores: newDuelScores,
-                                pairingResult: { ...round.pairingResult, fixedDuels: newDuels }
-                              };
-                              setData({ ...data, rounds: newRounds });
                             }
-                          }
-                        }}
-                        className="bg-gray-600 rounded px-2 py-0.5 text-xs"
-                      >
-                        <option value="">-</option>
-                        {[1, 2, 3, 4, 5, 6].map(t => (
-                          <option 
-                            key={t} 
-                            value={t} 
-                            disabled={usedTables.includes(t)}
-                          >
-                            {t} {usedTables.includes(t) ? '(prise)' : ''}
-                          </option>
-                        ))}
-                      </select>
+                          }}
+                          className="bg-gray-600 rounded px-2 py-0.5 text-xs"
+                        >
+                          <option value="">-</option>
+                          {['A', 'B', 'C'].map(t => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   </div>
                 );
