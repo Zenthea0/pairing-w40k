@@ -1727,7 +1727,7 @@ function PairingEngine() {
                             newRounds[index] = { ...round, scenario: e.target.value };
                             setData({ ...data, rounds: newRounds });
                           }}
-                          placeholder="Ex: Cibles prioritaires"
+                          placeholder="V11 : fonction des dispositions des forces"
                           className="w-full bg-gray-600 rounded px-2 py-1.5 text-sm"
                         />
                       </div>
@@ -1742,7 +1742,7 @@ function PairingEngine() {
                             newRounds[index] = { ...round, deployment: e.target.value };
                             setData({ ...data, rounds: newRounds });
                           }}
-                          placeholder="Ex: Marteau et Enclume"
+                          placeholder="V11 : fonction des dispositions des forces"
                           className="w-full bg-gray-600 rounded px-2 py-1.5 text-sm"
                         />
                       </div>
