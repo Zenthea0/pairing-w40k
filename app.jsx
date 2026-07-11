@@ -1441,7 +1441,7 @@ function PairingEngine() {
             
             <div className="space-y-2">
               {data.myTeam.players.map((player, index) => (
-                <div key={index} className="grid grid-cols-4 gap-2">
+                <div key={index} className="grid grid-cols-5 gap-2">
                   <input
                     type="text"
                     placeholder="Pseudo"
@@ -1486,6 +1486,21 @@ function PairingEngine() {
                     }}
                     className="bg-gray-700 rounded px-3 py-2 text-sm"
                   />
+                  <select
+                    value={player.forcesDisposition || ''}
+                    onChange={(e) => {
+                      const newPlayers = [...data.myTeam.players];
+                      newPlayers[index] = { ...player, forcesDisposition: e.target.value };
+                      setData({ ...data, myTeam: { ...data.myTeam, players: newPlayers } });
+                    }}
+                    className="bg-gray-700 rounded px-3 py-2 text-sm"
+                    title="Disposition des forces"
+                  >
+                    <option value="">Disposition...</option>
+                    {FORCES_DISPOSITIONS.map(d => (
+                      <option key={d.value} value={d.value}>{d.full}</option>
+                    ))}
+                  </select>
                 </div>
               ))}
             </div>
