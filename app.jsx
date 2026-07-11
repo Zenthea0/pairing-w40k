@@ -1631,6 +1631,7 @@ function PairingEngine() {
                   {armyListOpponent?.players.map((p, i) => (
                     <option key={i} value={i}>
                       {p.factionShort || p.faction || p.pseudo || `Joueur ${i + 1}`}
+                      {p.forcesDisposition ? ` (${getDispositionLabel(p.forcesDisposition)})` : ''}
                     </option>
                   ))}
                 </select>
@@ -1640,6 +1641,11 @@ function PairingEngine() {
             <div>
               <label className="block text-sm text-gray-400 mb-2">
                 Liste d'armée de {armyListPlayer?.factionShort || armyListPlayer?.faction || 'ce joueur'}
+                {armyListPlayer?.forcesDisposition && (
+                  <span className="text-blue-300 ml-2">
+                    — Disposition : {getDispositionFull(armyListPlayer.forcesDisposition)}
+                  </span>
+                )}
               </label>
               <textarea
                 value={armyListPlayer?.armyList || ''}
