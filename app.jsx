@@ -1066,6 +1066,11 @@ const ArmyListModal = ({ player, onClose }) => {
           <div>
             <h3 className="text-lg font-bold">{player.faction || 'Faction inconnue'}</h3>
             <p className="text-sm text-gray-400">{player.pseudo} - {player.detachment}</p>
+            {player.forcesDisposition && (
+              <p className="text-sm text-blue-300 mt-1">
+                Disposition des forces : {getDispositionFull(player.forcesDisposition)}
+              </p>
+            )}
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl">&times;</button>
         </div>
