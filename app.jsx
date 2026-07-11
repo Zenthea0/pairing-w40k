@@ -3441,7 +3441,8 @@ function PairingEngine() {
       
       // Our player
       const textStartX = duel.table ? padding + 70 : padding + 45;
-      const ourName = `${ourPlayer?.pseudo || '?'} (${ourPlayer?.factionShort || ourPlayer?.faction?.slice(0, 4) || '?'})`;
+      const ourDispo = ourPlayer?.forcesDisposition ? ` [${getDispositionLabel(ourPlayer.forcesDisposition)}]` : '';
+      const ourName = `${ourPlayer?.pseudo || '?'} (${ourPlayer?.factionShort || ourPlayer?.faction?.slice(0, 4) || '?'})${ourDispo}`;
       drawText(ourName, textStartX, duelY + 15, { size: 12, color: colors.blue });
       
       // Symbol
@@ -3449,7 +3450,8 @@ function PairingEngine() {
       drawText(symbol, width / 2 + 20, duelY + 15, { size: 14, bold: true, color: symbolColors[symbol] || colors.textMuted, align: 'center' });
       
       // Their player
-      const theirName = `${theirPlayer?.pseudo || '?'} (${theirPlayer?.factionShort || theirPlayer?.faction?.slice(0, 4) || '?'})`;
+      const theirDispo = theirPlayer?.forcesDisposition ? ` [${getDispositionLabel(theirPlayer.forcesDisposition)}]` : '';
+      const theirName = `${theirPlayer?.pseudo || '?'} (${theirPlayer?.factionShort || theirPlayer?.faction?.slice(0, 4) || '?'})${theirDispo}`;
       drawText(theirName, textStartX, duelY + 35, { size: 12, color: colors.red });
       
       // Score if available
