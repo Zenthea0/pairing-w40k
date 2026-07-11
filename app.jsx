@@ -405,41 +405,64 @@ const createDefaultData = () => ({
 // IMPORT / EXPORT JSON
 // ============================================
 
-const exportToJSON = (data) => {
-  const exportData = {
-    version: '1.1',
-    exportDate: new Date().toISOString(),
-    myTeam: {
-      name: data.myTeam.name,
-      players: data.myTeam.players.map(p => ({
-        pseudo: p.pseudo,
+// Construit l'objet d'export JSON (sans le télécharger).
+// Réutilisé par exportToJSON et par la sauvegarde automatique avant import.
+const buildExportObject = (data) => ({
+  version: '2.0',
+  exportDate: new Date().toISOString(),
+  myTeam: {
+    name: data.myTeam.name,
+    players: data.myTeam.players.map(p => ({
+      pseudo: p.pseudo,
+      faction: p.faction,
+      factionShort: p.factionShort,
+      detachment: p.detachment || undefined,
+      forcesDisposition: p.forcesDisposition || undefined,
+    })),
+  },
+  opponents: data.opponents
+    .filter(opp => opp.isConfigured)
+    .map(opp => ({
+      name: opp.name,
+      players: opp.players.map(p => ({
+        pseudo: p.pseudo || undefined,
         faction: p.faction,
         factionShort: p.factionShort,
         detachment: p.detachment || undefined,
         forcesDisposition: p.forcesDisposition || undefined,
+        armyList: p.armyList || undefined,
       })),
-    },
-    opponents: data.opponents
-      .filter(opp => opp.isConfigured)
-      .map(opp => ({
-        name: opp.name,
-        players: opp.players.map(p => ({
-          pseudo: p.pseudo || undefined,
-          faction: p.faction,
-          factionShort: p.factionShort,
-          detachment: p.detachment || undefined,
-          forcesDisposition: p.forcesDisposition || undefined,
-          armyList: p.armyList || undefined,
-        })),
-        matrix: opp.matrix,
-      })),
-  };
+      matrix: opp.matrix,
+    })),
+  rounds: (data.rounds || []).map(round => ({
+    id: round.id,
+    name: round.name,
+    opponentIndex: round.opponentIndex,
+    scenario: round.scenario || '',
+    deployment: round.deployment || '',
+    // Version allégée : on n'exporte que les données brutes,
+    // initialStats/initialGuaranteed/score seront recalculés à l'import
+    pairingResult: round.pairingResult ? {
+      fixedDuels: round.pairingResult.fixedDuels || [],
+      pairingDetails: round.pairingResult.pairingDetails || null,
+    } : null,
+    duelScores: round.duelScores || null,
+  })),
+});
+
+const exportToJSON = (data) => {
+  // Formatage de la date pour le nom de fichier (YYYY-MM-DD)
+  const now = new Date();
+  const dateStr = now.toISOString().slice(0, 10);
+  const teamNameSafe = (data.myTeam.name || 'export').replace(/[^a-zA-Z0-9_-]/g, '_');
+  
+  const exportData = buildExportObject(data);
   
   const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `pairing_export.json`;
+  a.download = `${teamNameSafe}_${dateStr}.json`;
   a.click();
   URL.revokeObjectURL(url);
 };
@@ -451,64 +474,86 @@ const importFromJSON = (jsonString) => {
       throw new Error('Format invalide');
     }
     
-    // Créer les données avec des IDs DÉTERMINISTES basés sur la position
-    const newData = {
-      myTeam: {
-        name: imported.myTeam.name,
-        players: imported.myTeam.players.map((p, i) => ({
-          id: `us_${i}`, // ID déterministe
-          pseudo: p.pseudo || `Joueur ${i + 1}`,
-          faction: p.faction || '',
-          factionShort: p.factionShort || '',
-          detachment: p.detachment || '',
-          forcesDisposition: p.forcesDisposition || '',
-        })),
-      },
-      opponents: Array.from({ length: 5 }, (_, i) => {
-        const importedOpp = imported.opponents[i];
-        if (importedOpp) {
-          return {
-            name: importedOpp.name,
-            players: importedOpp.players.map((p, j) => ({
-              id: `opp${i}_${j}`, // ID déterministe
-              pseudo: p.pseudo || '',
-              faction: p.faction || '',
-              factionShort: p.factionShort || '',
-              detachment: p.detachment || '',
-              forcesDisposition: p.forcesDisposition || '',
-              armyList: p.armyList || '',
-            })),
-            matrix: importedOpp.matrix,
-            isConfigured: true,
-          };
-        }
-        return {
-          name: `Adversaire ${i + 1}`,
-          players: Array.from({ length: 6 }, (_, j) => ({
-            id: `opp${i}_${j}`,
-            pseudo: '',
-            faction: '',
-            factionShort: '',
-            detachment: '',
-            forcesDisposition: '',
-            armyList: '',
-          })),
-          matrix: Array.from({ length: 6 }, () => Array(6).fill('=')),
-          isConfigured: false,
-        };
-      }),
-      // Toujours initialiser les rounds
-      rounds: Array.from({ length: 5 }, (_, i) => ({
-        id: i,
-        name: `Ronde ${i + 1}`,
-        opponentIndex: null,
-        scenario: '',
-        deployment: '',
-        pairingResult: null,
-        duelScores: null,
+    // Base propre : on part d'un état par défaut et on écrase par-dessus
+    const baseData = createDefaultData();
+    
+    // === Import de mon équipe ===
+    const myTeam = {
+      name: imported.myTeam.name || 'Mon Équipe',
+      players: imported.myTeam.players.map((p, i) => ({
+        id: `us_${i}`, // ID déterministe
+        pseudo: p.pseudo || `Joueur ${i + 1}`,
+        faction: p.faction || '',
+        factionShort: p.factionShort || '',
+        detachment: p.detachment || '',
+        forcesDisposition: p.forcesDisposition || '',
       })),
-      selectedOpponentIndex: 0,
-      selectedRoundIndex: null,
+    };
+    
+    // === Import des adversaires ===
+    const opponents = Array.from({ length: 5 }, (_, i) => {
+      const importedOpp = imported.opponents[i];
+      if (importedOpp) {
+        return {
+          name: importedOpp.name,
+          players: importedOpp.players.map((p, j) => ({
+            id: `opp${i}_${j}`, // ID déterministe
+            pseudo: p.pseudo || '',
+            faction: p.faction || '',
+            factionShort: p.factionShort || '',
+            detachment: p.detachment || '',
+            forcesDisposition: p.forcesDisposition || '',
+            armyList: p.armyList || '',
+          })),
+          matrix: importedOpp.matrix,
+          isConfigured: true,
+        };
+      }
+      return baseData.opponents[i]; // adversaire vide par défaut
+    });
+    
+    // === Import des rondes (v2.0) avec protections défensives ===
+    const importedRounds = Array.isArray(imported.rounds) ? imported.rounds : [];
+    const rounds = Array.from({ length: 5 }, (_, i) => {
+      const importedRound = importedRounds[i];
+      if (!importedRound) {
+        return baseData.rounds[i]; // ronde vide par défaut
+      }
+      
+      // Protection Q3 : opponentIndex invalide -> null
+      let opponentIndex = importedRound.opponentIndex;
+      if (opponentIndex !== null && opponentIndex !== undefined) {
+        if (typeof opponentIndex !== 'number' || opponentIndex < 0 || opponentIndex >= 5 || !opponents[opponentIndex]?.isConfigured) {
+          opponentIndex = null;
+        }
+      } else {
+        opponentIndex = null;
+      }
+      
+      // Protection Q6 : duelScores sans pairingResult -> ignorer duelScores
+      const hasPairingResult = importedRound.pairingResult && importedRound.pairingResult.fixedDuels;
+      const duelScores = hasPairingResult ? (importedRound.duelScores || null) : null;
+      
+      return {
+        id: importedRound.id ?? i,
+        name: importedRound.name || `Ronde ${i + 1}`,
+        opponentIndex: opponentIndex,
+        scenario: importedRound.scenario || '',
+        deployment: importedRound.deployment || '',
+        pairingResult: hasPairingResult ? {
+          fixedDuels: importedRound.pairingResult.fixedDuels,
+          pairingDetails: importedRound.pairingResult.pairingDetails || null,
+          opponentIndex: opponentIndex,
+        } : null,
+        duelScores: duelScores,
+      };
+    });
+    
+    const newData = {
+      ...baseData,
+      myTeam,
+      opponents,
+      rounds,
     };
     
     return { success: true, data: newData };
@@ -1861,12 +1906,34 @@ function PairingEngine() {
       
       const reader = new FileReader();
       reader.onload = (e) => {
+        // Sauvegarde automatique de l'état actuel avant import
+        // pour permettre une restauration si l'utilisateur importe par erreur
+        try {
+          const now = new Date();
+          const dateStr = now.toISOString().slice(0, 10);
+          const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '-');
+          const teamNameSafe = (data.myTeam.name || 'backup').replace(/[^a-zA-Z0-9_-]/g, '_');
+          
+          const backupData = buildExportObject(data);
+          const backupBlob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+          const backupUrl = URL.createObjectURL(backupBlob);
+          const backupLink = document.createElement('a');
+          backupLink.href = backupUrl;
+          backupLink.download = `backup_${teamNameSafe}_${dateStr}_${timeStr}.json`;
+          backupLink.click();
+          URL.revokeObjectURL(backupUrl);
+        } catch (backupError) {
+          // Si la sauvegarde échoue, on continue quand même l'import
+          console.warn('Backup avant import échoué:', backupError);
+        }
+        
+        // Import proprement dit
         const result = importFromJSON(e.target?.result);
         if (result.success) {
           setData(result.data);
-          setImportSuccess('Import réussi !');
+          setImportSuccess('Import réussi ! Une sauvegarde de l\'état précédent a été téléchargée.');
           setImportError('');
-          setTimeout(() => setImportSuccess(''), 3000);
+          setTimeout(() => setImportSuccess(''), 5000);
         } else {
           setImportError(result.error);
           setImportSuccess('');
