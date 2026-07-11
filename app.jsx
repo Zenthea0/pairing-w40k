@@ -1903,7 +1903,7 @@ function PairingEngine() {
           <h3 className="font-semibold mb-3">Joueurs adverses</h3>
           <div className="space-y-2">
             {opponent.players.map((player, index) => (
-              <div key={index} className="grid grid-cols-4 gap-2">
+              <div key={index} className="grid grid-cols-5 gap-2">
                 <input
                   type="text"
                   placeholder="Pseudo"
@@ -1956,6 +1956,23 @@ function PairingEngine() {
                   }}
                   className="bg-gray-700 rounded px-3 py-2 text-sm"
                 />
+                <select
+                  value={player.forcesDisposition || ''}
+                  onChange={(e) => {
+                    const newPlayers = [...opponent.players];
+                    newPlayers[index] = { ...player, forcesDisposition: e.target.value };
+                    const newOpponents = [...data.opponents];
+                    newOpponents[matrixEditorIndex] = { ...opponent, players: newPlayers, isConfigured: true };
+                    setData({ ...data, opponents: newOpponents });
+                  }}
+                  className="bg-gray-700 rounded px-3 py-2 text-sm"
+                  title="Disposition des forces"
+                >
+                  <option value="">Disposition...</option>
+                  {FORCES_DISPOSITIONS.map(d => (
+                    <option key={d.value} value={d.value}>{d.full}</option>
+                  ))}
+                </select>
               </div>
             ))}
           </div>
@@ -1975,7 +1992,12 @@ function PairingEngine() {
                       title={`Cliquer pour voir la liste de ${p.faction || `Adversaire ${i + 1}`}`}
                       onClick={() => setShowArmyListPlayer(p)}
                     >
-                      {p.factionShort || p.faction || `Adv ${i + 1}`}
+                      <div>{p.factionShort || p.faction || `Adv ${i + 1}`}</div>
+                      {p.forcesDisposition && (
+                        <div className="text-[10px] text-gray-400 font-normal">
+                          ({getDispositionLabel(p.forcesDisposition)})
+                        </div>
+                      )}
                     </th>
                   ))}
                 </tr>
