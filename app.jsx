@@ -777,16 +777,28 @@ const computeGuaranteedScore = (state, matrix) => {
   return bestGuaranteed;
 };
 
-const analyzeCurrentPhase = (state, matrix) => {
+const analyzeCurrentPhase = (state, matrix, preselectedThem = null) => {
   if (state.phase === 'finished') {
     return { ourRanking: [], theirRanking: [], bestGuaranteed: calculateTeamScore(state.fixedDuels, matrix) };
   }
-  
+
   const ourMoves = generateLegalMoves(state, 'us');
-  const theirMoves = generateLegalMoves(state, 'them');
-  
+  let theirMoves = generateLegalMoves(state, 'them');
+
   if (ourMoves.length === 0 || theirMoves.length === 0) {
     return { ourRanking: [], theirRanking: [], bestGuaranteed: calculateTeamScore(state.fixedDuels, matrix) };
+  }
+
+  // Si une présélection adverse est fournie (mode simulation "what-if"),
+  // filtrer les coups adverses pour ne garder que le coup présélectionné.
+  // Cela permet de calculer les résultats conditionnels à l'hypothèse que
+  // l'adversaire joue effectivement ce coup.
+  if (preselectedThem !== null && preselectedThem.length > 0) {
+    const preselectedKey = JSON.stringify([...preselectedThem].sort());
+    const matchingMove = theirMoves.find(m => JSON.stringify([...m].sort()) === preselectedKey);
+    if (matchingMove) {
+      theirMoves = [matchingMove];
+    }
   }
   
   const scenarioMatrix = ourMoves.map(ourMove =>
@@ -847,19 +859,19 @@ const computeGuaranteedScoreForMove = (state, matrix, ourMove) => {
 };
 
 // Génère l'arbre de décision à 3 niveaux
-const generateDecisionTree = (state, matrix, preselectedUs = null, myTeamPlayers = [], opponentPlayers = []) => {
+const generateDecisionTree = (state, matrix, preselectedUs = null, myTeamPlayers = [], opponentPlayers = [], preselectedThem = null) => {
   if (state.phase === 'finished') {
     return { nodes: [], finalScore: calculateTeamScore(state.fixedDuels, matrix) };
   }
-  
+
   // Obtenir les coups possibles
   let ourMoves = generateLegalMoves(state, 'us');
-  const theirMoves = generateLegalMoves(state, 'them');
-  
+  let theirMoves = generateLegalMoves(state, 'them');
+
   if (ourMoves.length === 0 || theirMoves.length === 0) {
     return { nodes: [], finalScore: calculateTeamScore(state.fixedDuels, matrix) };
   }
-  
+
   // Si présélection, filtrer nos coups
   if (preselectedUs !== null && preselectedUs.length > 0) {
     // Vérifier si la présélection correspond à un coup valide
@@ -867,6 +879,15 @@ const generateDecisionTree = (state, matrix, preselectedUs = null, myTeamPlayers
     const matchingMove = ourMoves.find(m => JSON.stringify([...m].sort()) === preselectedKey);
     if (matchingMove) {
       ourMoves = [matchingMove];
+    }
+  }
+
+  // Si présélection adverse (mode simulation "what-if"), filtrer leurs coups
+  if (preselectedThem !== null && preselectedThem.length > 0) {
+    const preselectedKey = JSON.stringify([...preselectedThem].sort());
+    const matchingMove = theirMoves.find(m => JSON.stringify([...m].sort()) === preselectedKey);
+    if (matchingMove) {
+      theirMoves = [matchingMove];
     }
   }
   
@@ -2167,9 +2188,18 @@ function PairingEngine() {
       return [];
     };
     
+    // Mode simulation "what-if" : uniquement en pairing libre, phases 1 ou 4,
+    // quand on a sélectionné un défenseur adverse sans sélectionner le nôtre.
+    // Les résultats affichés sont alors ceux conditionnels à ce choix adverse hypothétique.
+    const isLibreMode = state.roundIndex === null || state.roundIndex === undefined;
+    const isDefenderPhase = state.phase === 1 || state.phase === 4;
+    const simulatedThem = (isLibreMode && isDefenderPhase && selectedThem.length === 1 && selectedUs.length === 0)
+      ? selectedThem
+      : null;
+
     analysisCache.clear();
-    const analysis = analyzeCurrentPhase(state, matrix);
-    
+    const analysis = analyzeCurrentPhase(state, matrix, simulatedThem);
+
     const required = getRequiredSelections();
     const isSingleSelection = state.phase === 1 || state.phase === 4 || state.phase === 3 || state.phase === 6;
     const isAssignPhase = state.phase === 3 || state.phase === 6;
@@ -2428,7 +2458,7 @@ function PairingEngine() {
               
               <div className="p-4 overflow-auto flex-1 font-mono text-sm">
                 {(() => {
-                  const tree = generateDecisionTree(state, matrix, selectedUs.length > 0 ? selectedUs : null, data.myTeam.players, opponent.players);
+                  const tree = generateDecisionTree(state, matrix, selectedUs.length > 0 ? selectedUs : null, data.myTeam.players, opponent.players, simulatedThem);
                   
                   if (tree.nodes.length === 0) {
                     return <p className="text-gray-400 text-center">Aucune donnée disponible</p>;
